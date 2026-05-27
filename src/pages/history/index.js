@@ -1,6 +1,6 @@
 import { renderNavBar } from '../../components/nav-bar.js';
 import { renderPageHeader } from '../../components/page-header.js';
-import { getRecentMeals, getAnalysisHistory } from '../../services/meals.js';
+import { getRecentMeals } from '../../services/meals.js';
 
 export async function renderHistory() {
   const mealsRes = await getRecentMeals(30);

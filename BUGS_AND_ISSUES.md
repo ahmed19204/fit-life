@@ -9,26 +9,18 @@ _None currently blocking._
 ### BUG-001: Google OAuth Redirect
 - **Status**: Open
 - **Severity**: P1
-- **Description**: Google OAuth redirect URL is set to `${window.location.origin}/dashboard` but the app uses hash-based routing (`/#/dashboard`). After OAuth callback, the user may land on the wrong page.
+- **Description**: Google OAuth redirect URL uses `${window.location.origin}/#/dashboard`. After OAuth callback, the hash fragment may be stripped by the OAuth provider, causing the user to land on the wrong page.
 - **Impact**: Google sign-in may not redirect to the correct page.
-- **Fix**: Update `signInWithGoogle()` redirectTo to use hash-based URL or handle the OAuth callback in `app.js` initialization.
-- **File**: `src/services/auth.js`, line 130
+- **Fix**: Handle the OAuth callback in `app.js` initialization by checking for Supabase auth tokens in URL params.
+- **File**: `src/services/auth.js`
 
 ### BUG-002: Admin Dashboard RLS Restrictions
 - **Status**: Open
 - **Severity**: P1
-- **Description**: Admin dashboard queries use the anon key, which is restricted by RLS policies. Some admin-specific queries (listing all users, all meals) may return empty or limited data.
+- **Description**: Admin dashboard queries use the anon key, which is restricted by RLS policies. Admin-specific queries (listing all users, all meals) may return empty or limited data.
 - **Impact**: Admin stats may show inaccurate counts.
 - **Fix**: Implement a Supabase Edge Function with service_role key for admin queries, or create admin-specific RLS policies.
 - **File**: `src/pages/admin/index.js`
-
-### BUG-003: AI API Key Exposed in Frontend
-- **Status**: Open  
-- **Severity**: P1
-- **Description**: `VITE_GOOGLE_AI_API_KEY` is embedded in the frontend bundle via Vite's `import.meta.env`. While this is the anon key pattern, the Google AI API key should ideally be server-side only.
-- **Impact**: API key visible in browser DevTools/source.
-- **Fix**: Route all AI calls through Supabase Edge Functions only (remove direct Google AI fallback from frontend).
-- **File**: `src/services/ai.js`, `src/pages/assistant/index.js`
 
 ## Medium Priority (P2)
 
@@ -44,14 +36,14 @@ _None currently blocking._
 - **Severity**: P2
 - **Description**: Onboarding data is stored in a local JS object. If the user refreshes mid-onboarding, all data is lost.
 - **Impact**: Users must restart onboarding from scratch after page refresh.
-- **Fix**: Persist onboarding progress in localStorage or sessionStorage.
+- **Fix**: Persist onboarding progress in sessionStorage.
 
 ### BUG-006: Chat History Not Persisted
 - **Status**: Open
 - **Severity**: P2
 - **Description**: AI Coach chat history is stored in a module-level variable. Navigating away and returning clears the chat.
 - **Impact**: Users lose conversation context when navigating.
-- **Fix**: Store chat history in localStorage keyed by user ID.
+- **Fix**: Store chat history in sessionStorage keyed by user ID.
 
 ## Low Priority (P3)
 
@@ -60,20 +52,49 @@ _None currently blocking._
 - **Severity**: P3
 - **Description**: Streak calculation fetches last 100 meals and counts consecutive days. For users with many meals, this may miss older streak data.
 - **Impact**: Streak count may be inaccurate for very active users.
-- **Fix**: Create a dedicated streak tracking table or use Supabase RPC for efficient calculation.
+- **Fix**: Create a dedicated streak tracking table or use Supabase RPC.
 
 ### BUG-008: Static Notification Data
 - **Status**: Open
 - **Severity**: P3
 - **Description**: Notifications page uses hardcoded sample data, not real push notifications.
 - **Impact**: Notifications are not personalized or real-time.
-- **Fix**: Implement Web Push API or Supabase Realtime for live notifications.
+- **Fix**: Implement Web Push API or Supabase Realtime.
+
+### BUG-009: Training Page Demo Data
+- **Status**: Open
+- **Severity**: P3
+- **Description**: Training page uses hardcoded workout data (RECENT_WORKOUTS, WEEKLY_STATS). No database integration for workout tracking.
+- **Impact**: Training stats are static placeholders.
+- **Fix**: Create `workouts` table in Supabase and implement CRUD service.
 
 ---
 
 ## Resolved
 
-_No resolved bugs yet — all identified issues are from initial audit._
+### BUG-003: AI API Key Exposed in Frontend ✅
+- **Status**: RESOLVED (Session 3)
+- **Resolution**: Moved Google AI API key to Vercel serverless functions (`api/ai-nutrition.js`, `api/ai-chat.js`). Removed ALL `VITE_GOOGLE_AI_API_KEY` references from `src/`. Key now uses non-VITE prefix (`GOOGLE_AI_API_KEY`) so Vite doesn't bundle it.
+
+### BUG-010: Vite Host Blocking ✅
+- **Status**: RESOLVED (Session 3)
+- **Resolution**: Changed `allowedHosts: 'all'` (string, broken in Vite 8) to `allowedHosts: true` (boolean, correct). Vite 8 was parsing the string as characters `['a','l','l']` instead of bypassing the host check.
+
+### BUG-011: XSS in Router Error Handler ✅
+- **Status**: RESOLVED (Session 3)
+- **Resolution**: Added HTML entity escaping to router.js error messages before innerHTML insertion.
+
+### BUG-012: Admin Route Unprotected ✅
+- **Status**: RESOLVED (Session 3)
+- **Resolution**: Added email whitelist check in admin/index.js. Non-admin users see "Access Denied" page.
+
+### BUG-013: Unbound window._ Globals ✅
+- **Status**: RESOLVED (Session 3)
+- **Resolution**: Added `setupRecipeHandlers()`, `setupNotificationHandlers()`, `setupPremiumHandlers()` with proper `setTimeout(..., 50)` binding after render.
+
+### BUG-014: meals.js fail() Signature Mismatch ✅
+- **Status**: RESOLVED (Session 3)
+- **Resolution**: Updated shared `fail()` to support flexible call patterns. Updated all 18 fail() calls in meals.js.
 
 ## Last Updated
-2026-05-27
+2026-05-27 (Session 3)

@@ -4,7 +4,7 @@
  * Integrated with Supabase auth service.
  */
 import { registerUser, loginUser, signInWithGoogle } from '../../services/auth.js';
-import { isValidEmail, getPasswordStrength, validateSignupField, validateLoginField } from '../../utils/validation.js';
+import { getPasswordStrength } from '../../utils/validation.js';
 import { navigate, getQueryParams } from '../../services/router.js';
 
 let currentView = 'login';

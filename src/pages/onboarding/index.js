@@ -3,7 +3,7 @@
  * Multi-step onboarding with premium UI, data collection for AI plan generation.
  * Preserved onboarding logic from original FitLife project.
  */
-import { generateNutritionPlan, saveNutritionProfile, sanitizeUserData } from '../../services/ai.js';
+import { generateNutritionPlan, saveNutritionProfile } from '../../services/ai.js';
 import { navigate } from '../../services/router.js';
 
 let currentStep = 1;
