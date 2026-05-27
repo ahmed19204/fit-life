@@ -17,10 +17,6 @@ export function setBeforeEach(fn) {
   beforeEachGuard = fn;
 }
 
-export function registerRoute(path, handler) {
-  routes.set(path, handler);
-}
-
 export function registerRoutes(routeMap) {
   Object.entries(routeMap).forEach(([path, handler]) => routes.set(path, handler));
 }
@@ -38,7 +34,7 @@ export function getCurrentRoute() {
   return currentRoute;
 }
 
-export function getHash() {
+function getHash() {
   return window.location.hash.slice(1) || '/';
 }
 
@@ -57,10 +53,9 @@ async function handleRouteChange() {
 
   currentRoute = path;
 
-  // Find matching route (exact or pattern)
+  // Find matching route (exact or wildcard)
   let handler = routes.get(path);
   if (!handler) {
-    // Try wildcard
     handler = routes.get('*');
   }
 
@@ -76,8 +71,12 @@ async function handleRouteChange() {
       }
     } catch (e) {
       console.error('[Router] Error rendering:', path, e);
+      // Safely escape error message to prevent XSS
+      const safeMsg = String(e.message || 'Unknown error').replace(/[<>"'&]/g, c =>
+        ({ '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '&': '&amp;' })[c]
+      );
       appContainer.innerHTML = `<div class="flex items-center justify-center min-h-screen text-on-surface">
-        <div class="text-center"><p class="text-xl mb-2">Something went wrong</p><p class="text-on-surface-variant">${e.message}</p></div></div>`;
+        <div class="text-center"><p class="text-xl mb-2">Something went wrong</p><p class="text-on-surface-variant">${safeMsg}</p></div></div>`;
     }
 
     appContainer.style.opacity = '1';

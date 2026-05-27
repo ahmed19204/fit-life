@@ -115,7 +115,7 @@ export function renderLanding() {
         <div class="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
           <div class="flex items-center gap-2">
             <span class="text-sm font-bold">Fit<span class="text-primary">Life</span></span>
-            <span class="text-xs text-on-surface-variant">&copy; 2025</span>
+            <span class="text-xs text-on-surface-variant">&copy; ${new Date().getFullYear()}</span>
           </div>
           <div class="flex gap-6 text-xs text-on-surface-variant">
             <a href="#" class="hover:text-primary transition-colors">Privacy</a>

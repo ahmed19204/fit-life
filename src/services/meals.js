@@ -4,9 +4,7 @@
  * Preserved from original FitLife backend.
  */
 import { supabase, isConfigured } from './supabase.js';
-
-function ok(msg, data) { return { success: true, message: msg, data: data || {} }; }
-function fail(msg, data) { return { success: false, message: msg, data: data || {} }; }
+import { ok, fail } from '../utils/response.js';
 
 function sanitizeNumber(v, fb) { const p = Number(v); return Number.isFinite(p) && p >= 0 ? Math.round(p) : fb; }
 function sanitizeText(v, max) { return String(v || '').trim().slice(0, max); }
@@ -44,9 +42,9 @@ async function getUser() {
 }
 
 export async function getRecentMeals(limit = 10, filters = {}) {
-  if (!isConfigured) return fail('Database not available.', { meals: [] });
+  if (!isConfigured) return fail('DB_UNAVAILABLE', 'Database not available.', null, { meals: [] });
   const user = await getUser();
-  if (!user) return fail('Must be logged in.', { meals: [] });
+  if (!user) return fail('NOT_AUTHENTICATED', 'Must be logged in.', null, { meals: [] });
 
   try {
     let query = supabase.from('meals').select('*').eq('user_id', user.id)
@@ -55,21 +53,21 @@ export async function getRecentMeals(limit = 10, filters = {}) {
     if (filters.to) query = query.lte('created_at', filters.to);
 
     const { data, error } = await query;
-    if (error) return fail('Failed to load meals.', { meals: [], error });
+    if (error) return fail('QUERY_ERROR', 'Failed to load meals.', error, { meals: [] });
     const meals = (data || []).map(normalizeMeal).filter(Boolean);
     return ok(meals.length ? 'Meals loaded.' : 'No meals found.', { meals, isEmpty: meals.length === 0 });
   } catch (e) {
-    return fail('Failed to load meals.', { meals: [], error: e });
+    return fail('QUERY_ERROR', 'Failed to load meals.', e, { meals: [] });
   }
 }
 
 export async function saveMeal(meal) {
-  if (!isConfigured) return fail('Database not available.');
+  if (!isConfigured) return fail('DB_UNAVAILABLE', 'Database not available.');
   const user = await getUser();
-  if (!user) return fail('Must be logged in.');
+  if (!user) return fail('NOT_AUTHENTICATED', 'Must be logged in.');
 
   const safe = sanitizeMeal(meal);
-  if (!safe) return fail('Meal name is required.');
+  if (!safe) return fail('VALIDATION_ERROR', 'Meal name is required.');
 
   const { data, error } = await supabase.from('meals').insert({
     user_id: user.id, name: safe.name, type: safe.type, time: safe.time,
@@ -77,24 +75,24 @@ export async function saveMeal(meal) {
     image: safe.image, ai_suggested: safe.aiSuggested,
   }).select().single();
 
-  if (error) return fail('Failed to save meal.', { error });
+  if (error) return fail('INSERT_ERROR', 'Failed to save meal.', error);
   return ok('Meal saved.', { meal: normalizeMeal(data) });
 }
 
 export async function deleteMeal(mealId) {
-  if (!isConfigured) return fail('Database not available.');
+  if (!isConfigured) return fail('DB_UNAVAILABLE', 'Database not available.');
   const user = await getUser();
-  if (!user) return fail('Must be logged in.');
+  if (!user) return fail('NOT_AUTHENTICATED', 'Must be logged in.');
 
   const { error } = await supabase.from('meals').delete().eq('id', mealId).eq('user_id', user.id);
-  if (error) return fail('Failed to delete meal.', { error });
+  if (error) return fail('DELETE_ERROR', 'Failed to delete meal.', error);
   return ok('Meal deleted.');
 }
 
 export async function saveAnalysisHistory(entry) {
-  if (!isConfigured) return fail('Database not available.');
+  if (!isConfigured) return fail('DB_UNAVAILABLE', 'Database not available.');
   const user = await getUser();
-  if (!user) return fail('Must be logged in.');
+  if (!user) return fail('NOT_AUTHENTICATED', 'Must be logged in.');
 
   const inputType = ['image', 'description', 'manual'].includes(entry?.input_type) ? entry.input_type : 'manual';
   const { data, error } = await supabase.from('analysis_history').insert({
@@ -105,22 +103,22 @@ export async function saveAnalysisHistory(entry) {
     result: entry?.result && typeof entry.result === 'object' ? entry.result : {},
   }).select().single();
 
-  if (error) return fail('Failed to save analysis.', { error });
+  if (error) return fail('INSERT_ERROR', 'Failed to save analysis.', error);
   return ok('Analysis saved.', { analysis: data });
 }
 
 export async function getAnalysisHistory(limit = 20) {
-  if (!isConfigured) return fail('Database not available.', { history: [] });
+  if (!isConfigured) return fail('DB_UNAVAILABLE', 'Database not available.', null, { history: [] });
   const user = await getUser();
-  if (!user) return fail('Must be logged in.', { history: [] });
+  if (!user) return fail('NOT_AUTHENTICATED', 'Must be logged in.', null, { history: [] });
 
   try {
     const { data, error } = await supabase.from('analysis_history').select('*')
       .eq('user_id', user.id).order('created_at', { ascending: false }).limit(limit);
-    if (error) return fail('Failed to load history.', { history: [], error });
+    if (error) return fail('QUERY_ERROR', 'Failed to load history.', error, { history: [] });
     return ok('History loaded.', { history: data || [], isEmpty: !data?.length });
   } catch (e) {
-    return fail('Failed to load history.', { history: [], error: e });
+    return fail('QUERY_ERROR', 'Failed to load history.', e, { history: [] });
   }
 }
 

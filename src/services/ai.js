@@ -1,18 +1,14 @@
 /**
  * FitLife AI Service
- * Handles AI nutrition plan generation via Supabase Edge Function or direct Google AI.
+ * Handles AI nutrition plan generation via Supabase Edge Function,
+ * server-side proxy (/api/ai-nutrition), or local BMR fallback.
+ * SECURITY: Google AI API key is NOT exposed in frontend.
  * Preserved from original FitLife backend - source of truth for AI logic.
  */
 import { supabase, isConfigured } from './supabase.js';
+import { ok, fail } from '../utils/response.js';
 
-const GOOGLE_AI_API_KEY = import.meta.env.VITE_GOOGLE_AI_API_KEY;
-const GOOGLE_AI_MODEL = 'gemini-2.0-flash';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-
-function ok(msg, data) { return { success: true, message: msg, data: data || {} }; }
-function fail(code, msg, err) {
-  return { success: false, message: msg, data: { code, error: err ? { message: err.message || 'Error', status: err.status || null } : null } };
-}
 
 function sanitizeStringList(value, maxItems) {
   if (!Array.isArray(value)) return [];
@@ -117,23 +113,17 @@ Return ONLY a JSON object:
 Requirements: Mifflin-St Jeor + activity multiplier + goal adjustment. ${input.meals_per_day} meals. 2-4 foods per meal. ONLY JSON, no markdown.`;
 }
 
-async function callGoogleAIDirect(input) {
-  if (!GOOGLE_AI_API_KEY) throw new Error('Google AI API key not configured');
+async function callServerProxy(input) {
   const prompt = buildPrompt(input);
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GOOGLE_AI_MODEL}:generateContent?key=${GOOGLE_AI_API_KEY}`, {
+  const res = await fetch('/api/ai-nutrition', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { maxOutputTokens: 2000, temperature: 0.7 },
-    }),
+    body: JSON.stringify({ prompt }),
   });
-  if (!res.ok) throw new Error(`Google AI returned ${res.status}`);
+  if (!res.ok) throw new Error(`Server proxy returned ${res.status}`);
   const result = await res.json();
-  let content = result.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-  if (!content) throw new Error('Empty response from Google AI');
-  content = content.replace(/^```json\n?/, '').replace(/\n?```$/, '').replace(/^```\n?/, '').replace(/\n?```$/, '');
-  return JSON.parse(content);
+  if (!result.success) throw new Error(result.message || 'Proxy error');
+  return result.data;
 }
 
 async function callEdgeFunction(input) {
@@ -157,13 +147,13 @@ export async function generateNutritionPlan(onboardingData) {
     return fail('MISSING_DATA', 'Missing required fields: age, weight, height, goal, activity_level');
 
   try {
-    // Try Edge Function first, fall back to direct Google AI, then fallback calculation
+    // Triple fallback: Edge Function → Server Proxy → Local BMR Calculation
     let plan;
     try {
       plan = await callEdgeFunction(sanitized);
     } catch {
       try {
-        plan = await callGoogleAIDirect(sanitized);
+        plan = await callServerProxy(sanitized);
       } catch {
         plan = generateFallbackPlan(sanitized);
       }

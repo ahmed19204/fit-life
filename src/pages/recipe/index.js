@@ -24,10 +24,68 @@ const SAMPLE_RECIPES = [
   { name: 'Greek Yogurt Parfait', time: '5 min', cal: 220, protein: 20, difficulty: 'Easy', category: 'snack', image: 'icecream' },
 ];
 
+function setupRecipeHandlers() {
+  let activeCategory = 'all';
+
+  window._filterRecipes = (query) => {
+    const q = query.toLowerCase();
+    document.querySelectorAll('.recipe-card').forEach(card => {
+      const name = card.querySelector('.text-sm.font-bold')?.textContent?.toLowerCase() || '';
+      card.style.display = name.includes(q) ? '' : 'none';
+    });
+  };
+
+  window._filterCategory = (catId) => {
+    activeCategory = catId;
+    // Update active button styles
+    document.querySelectorAll('[id^="cat-"]').forEach(btn => {
+      if (btn.id === `cat-${catId}`) {
+        btn.className = btn.className.replace(/bg-surface-container-low border border-outline-variant\/10 text-on-surface-variant/, 'bg-primary text-on-primary');
+      } else {
+        btn.className = btn.className.replace(/bg-primary text-on-primary/, 'bg-surface-container-low border border-outline-variant/10 text-on-surface-variant');
+      }
+    });
+    // Filter recipe cards
+    document.querySelectorAll('.recipe-card').forEach(card => {
+      card.style.display = (catId === 'all' || card.dataset.category === catId) ? '' : 'none';
+    });
+  };
+
+  window._generateRecipe = () => {
+    const input = document.getElementById('ingredientInput');
+    const result = document.getElementById('aiRecipeResult');
+    if (!input || !result) return;
+    const ingredients = input.value.trim();
+    if (!ingredients) { input.focus(); return; }
+    result.classList.remove('hidden');
+    result.innerHTML = `<div class="p-3 rounded-lg bg-primary/5 border border-primary/10 text-xs text-on-surface-variant">
+      <span class="material-symbols-outlined text-primary text-sm animate-pulse mr-1">auto_awesome</span>
+      AI recipe generation from ingredients is a Premium feature. Upgrade to unlock!
+    </div>`;
+  };
+
+  window._viewRecipe = (index) => {
+    const recipe = SAMPLE_RECIPES[index];
+    if (!recipe) return;
+    const result = document.getElementById('aiRecipeResult');
+    if (!result) return;
+    result.classList.remove('hidden');
+    result.innerHTML = `<div class="p-3 rounded-lg bg-surface-container-low border border-outline-variant/10">
+      <p class="text-sm font-bold text-on-surface mb-1">${recipe.name}</p>
+      <div class="flex gap-3 text-[10px] text-on-surface-variant">
+        <span>${recipe.time}</span><span>${recipe.cal} kcal</span><span>P: ${recipe.protein}g</span><span>${recipe.difficulty}</span>
+      </div>
+      <p class="text-xs text-on-surface-variant mt-2">Full recipe details available with Premium. This is a sample preview.</p>
+    </div>`;
+  };
+}
+
 export async function renderRecipe() {
   const profileRes = await getNutritionProfile();
   const profile = profileRes.data?.profile || {};
   const dietType = profile.diet_type || 'balanced';
+
+  setTimeout(setupRecipeHandlers, 50);
 
   return `
     <div class="min-h-screen bg-surface text-on-surface pb-24">

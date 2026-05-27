@@ -2,7 +2,7 @@
  * FitLife Bottom Navigation Bar
  * Premium mobile-first navigation matching Stitch UI design.
  */
-import { navigate, getCurrentRoute } from '../services/router.js';
+import { getCurrentRoute } from '../services/router.js';
 
 const NAV_ITEMS = [
   { path: '/dashboard', icon: 'home', label: 'Home' },
@@ -34,6 +34,3 @@ export function renderNavBar() {
     </nav>`;
 }
 
-export function isNavRoute(path) {
-  return NAV_ITEMS.some(item => path === item.path || (item.path !== '/dashboard' && path?.startsWith(item.path)));
-}

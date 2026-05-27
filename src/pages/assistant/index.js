@@ -1,15 +1,13 @@
 /**
  * FitLife AI Coach Assistant
- * Real AI-powered nutrition assistant using Google Gemini API.
+ * Real AI-powered nutrition assistant via server-side proxy.
+ * SECURITY: No API keys in frontend — calls /api/ai-chat.
  * Supports conversation history, quick prompts, and contextual advice.
  */
 import { renderNavBar } from '../../components/nav-bar.js';
 import { renderPageHeader } from '../../components/page-header.js';
 import { getNutritionProfile } from '../../services/ai.js';
 import { getCurrentUser, getDisplayName } from '../../services/auth.js';
-
-const GOOGLE_AI_API_KEY = import.meta.env.VITE_GOOGLE_AI_API_KEY;
-const GOOGLE_AI_MODEL = 'gemini-2.0-flash';
 
 const QUICK_PROMPTS = [
   { icon: 'restaurant', text: 'What should I eat for lunch today?' },
@@ -68,10 +66,6 @@ Guidelines:
 }
 
 async function callAI(message) {
-  if (!GOOGLE_AI_API_KEY) {
-    return "I'm not fully configured yet. Please ensure the Google AI API key is set up to enable AI coaching.";
-  }
-
   const systemPrompt = getSystemPrompt(userProfile);
   const contents = [
     { role: 'user', parts: [{ text: systemPrompt }] },
@@ -90,19 +84,16 @@ async function callAI(message) {
   contents.push({ role: 'user', parts: [{ text: message }] });
 
   try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GOOGLE_AI_MODEL}:generateContent?key=${GOOGLE_AI_API_KEY}`, {
+    const res = await fetch('/api/ai-chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents,
-        generationConfig: { maxOutputTokens: 800, temperature: 0.7 },
-      }),
+      body: JSON.stringify({ contents }),
     });
 
-    if (!res.ok) throw new Error(`API returned ${res.status}`);
+    if (!res.ok) throw new Error(`Server returned ${res.status}`);
     const result = await res.json();
-    const text = result.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-    return text || "I couldn't generate a response. Please try again.";
+    if (!result.success) throw new Error(result.message || 'AI error');
+    return result.text || "I couldn't generate a response. Please try again.";
   } catch (e) {
     console.error('[AI Coach] Error:', e);
     return "Sorry, I'm having trouble connecting right now. Please try again in a moment.";

@@ -7,7 +7,7 @@ import { renderPageHeader } from '../../components/page-header.js';
 import { getCurrentUser, getDisplayName } from '../../services/auth.js';
 import { supabase } from '../../services/supabase.js';
 
-// Hardcoded admin emails (in production, use a Supabase role/column)
+// Admin whitelist — in production, replace with a Supabase role/column check
 const ADMIN_EMAILS = ['admin@fitlife.com'];
 
 async function fetchAdminStats() {
@@ -64,6 +64,20 @@ export async function renderAdmin() {
   if (!userRes.success) { window.location.hash = '/auth'; return ''; }
 
   const user = userRes.data.user;
+
+  // Enforce admin access — redirect non-admins
+  if (!ADMIN_EMAILS.includes(user.email)) {
+    return `
+      <div class="min-h-screen bg-surface text-on-surface flex items-center justify-center px-6">
+        <div class="text-center">
+          <span class="material-symbols-outlined text-error text-5xl mb-4 block">shield</span>
+          <h2 class="text-xl font-bold text-on-surface mb-2">Access Denied</h2>
+          <p class="text-sm text-on-surface-variant mb-6">You don't have admin privileges. Contact your administrator.</p>
+          <button onclick="window.location.hash='/dashboard'" class="px-6 py-3 rounded-full bg-primary-container text-on-primary-container font-bold text-sm">Go to Dashboard</button>
+        </div>
+      </div>`;
+  }
+
   const stats = await fetchAdminStats();
 
   return `

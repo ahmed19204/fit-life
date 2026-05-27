@@ -4,21 +4,7 @@
  * Preserved from original FitLife backend - source of truth for auth logic.
  */
 import { supabase, isConfigured } from './supabase.js';
-
-function ok(message, data) {
-  return { success: true, message, data: data || {} };
-}
-
-function fail(code, message, error) {
-  return {
-    success: false,
-    message,
-    data: {
-      code,
-      error: error ? { message: error.message || 'Unexpected error', status: error.status || null } : null,
-    },
-  };
-}
+import { ok, fail } from '../utils/response.js';
 
 function mapAuthError(error, action) {
   const raw = error?.message || 'Unexpected authentication error.';

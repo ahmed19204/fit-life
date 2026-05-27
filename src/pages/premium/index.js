@@ -31,7 +31,37 @@ const PLANS = [
   { name: 'Lifetime', price: '$149.99', period: 'one-time', popular: false, save: 'Best Value' },
 ];
 
+function setupPremiumHandlers() {
+  window._selectPlan = (planName) => {
+    // Highlight selected plan
+    document.querySelectorAll('[onclick*="_selectPlan"]').forEach(btn => {
+      btn.classList.remove('border-primary', 'bg-primary/5');
+      btn.classList.add('border-outline-variant/10', 'bg-surface-container-low/30');
+    });
+    const selected = [...document.querySelectorAll('[onclick*="_selectPlan"]')].find(btn =>
+      btn.getAttribute('onclick')?.includes(planName)
+    );
+    if (selected) {
+      selected.classList.remove('border-outline-variant/10', 'bg-surface-container-low/30');
+      selected.classList.add('border-primary', 'bg-primary/5');
+    }
+  };
+
+  window._startTrial = () => {
+    const btn = document.querySelector('[onclick*="_startTrial"]');
+    if (btn) {
+      btn.innerHTML = '<span class="flex items-center justify-center gap-2"><span class="material-symbols-outlined text-sm animate-spin">progress_activity</span> Coming Soon...</span>';
+      btn.disabled = true;
+      setTimeout(() => {
+        btn.innerHTML = 'Start 7-Day Free Trial';
+        btn.disabled = false;
+      }, 2000);
+    }
+  };
+}
+
 export function renderPremium() {
+  setTimeout(setupPremiumHandlers, 50);
   return `
     <div class="min-h-screen bg-surface text-on-surface pb-8">
       ${renderPageHeader({ title: 'Premium', showBack: true })}

@@ -29,8 +29,22 @@ const NOTIFICATION_GROUPS = [
   }
 ];
 
+function setupNotificationHandlers() {
+  window._markAllRead = () => {
+    document.querySelectorAll('[class*="border-primary/10"]').forEach(el => {
+      el.className = el.className.replace('bg-surface-container-low/70 border border-primary/10', 'bg-surface-container-low/30 border border-outline-variant/5');
+    });
+    // Remove unread dots
+    document.querySelectorAll('.w-2.h-2.rounded-full.bg-primary').forEach(dot => dot.remove());
+    // Update unread badge
+    const badge = document.querySelector('[class*="bg-primary/5"]');
+    if (badge) badge.remove();
+  };
+}
+
 export function renderNotifications() {
   const totalUnread = NOTIFICATION_GROUPS.reduce((acc, g) => acc + g.items.filter(n => n.unread).length, 0);
+  setTimeout(setupNotificationHandlers, 50);
 
   return `
     <div class="min-h-screen bg-surface text-on-surface pb-8">

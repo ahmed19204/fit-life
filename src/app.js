@@ -3,7 +3,7 @@
  * SPA Router setup, auth guards, and page registration.
  */
 import { setContainer, registerRoutes, setBeforeEach, start, navigate } from './services/router.js';
-import { isLoggedIn, onAuthStateChange, getCurrentSession } from './services/auth.js';
+import { isLoggedIn, onAuthStateChange } from './services/auth.js';
 import { checkOnboardingCompleted } from './services/ai.js';
 
 // Page imports
