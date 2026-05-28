@@ -3,12 +3,17 @@
  * Handles AI nutrition plan generation via Supabase Edge Function,
  * server-side proxy (/api/ai-nutrition), or local BMR fallback.
  * SECURITY: Google AI API key is NOT exposed in frontend.
- * Preserved from original FitLife backend - source of truth for AI logic.
+ * 
+ * All AI calls go through the centralized AI Request Manager
+ * to prevent 429 rate-limit errors via queue, throttle, dedup, cache, and retry.
  */
 import { supabase, isConfigured } from './supabase.js';
 import { ok, fail } from '../utils/response.js';
+import { makeAIRequest, makeOneShotAIRequest, clearOneShotLock, clearAICache } from './ai-request-manager.js';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+
+// ---------- Input Sanitization & Validation ----------
 
 function sanitizeStringList(value, maxItems) {
   if (!Array.isArray(value)) return [];
@@ -18,7 +23,7 @@ function sanitizeStringList(value, maxItems) {
 function validateNutritionInput(data) {
   const errors = [];
   if (!data || typeof data !== 'object') { errors.push('Invalid input'); return errors; }
-  const { age, weight, height, goal, activity_level, diet_type, meals_per_day } = data;
+  const { age, weight, height, goal, activity_level, meals_per_day } = data;
   if (age !== undefined && (typeof age !== 'number' || age < 10 || age > 120)) errors.push('Age must be 10-120');
   if (weight !== undefined && (typeof weight !== 'number' || weight < 20 || weight > 300)) errors.push('Weight must be 20-300 kg');
   if (height !== undefined && (typeof height !== 'number' || height < 80 || height > 250)) errors.push('Height must be 80-250 cm');
@@ -44,6 +49,8 @@ export function sanitizeUserData(onboardingData) {
     gender: onboardingData.gender || null,
   };
 }
+
+// ---------- Local Fallback Calculations ----------
 
 function calculateBMR(weight, height, age, gender) {
   return gender === 'female'
@@ -95,6 +102,8 @@ function generateFallbackPlan(input) {
   };
 }
 
+// ---------- Prompt Builder ----------
+
 function buildPrompt(input) {
   const diet = input.restrictions.length > 0 ? `Dietary restrictions: ${input.restrictions.join(', ')}.` : 'No dietary restrictions.';
   const health = input.health_conditions.length > 0 && !input.health_conditions.includes('none')
@@ -113,6 +122,8 @@ Return ONLY a JSON object:
 Requirements: Mifflin-St Jeor + activity multiplier + goal adjustment. ${input.meals_per_day} meals. 2-4 foods per meal. ONLY JSON, no markdown.`;
 }
 
+// ---------- AI Call Functions (now wrapped by manager) ----------
+
 async function callServerProxy(input) {
   const prompt = buildPrompt(input);
   const res = await fetch('/api/ai-nutrition', {
@@ -120,7 +131,11 @@ async function callServerProxy(input) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prompt }),
   });
-  if (!res.ok) throw new Error(`Server proxy returned ${res.status}`);
+  if (!res.ok) {
+    const err = new Error(`Server proxy returned ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
   const result = await res.json();
   if (!result.success) throw new Error(result.message || 'Proxy error');
   return result.data;
@@ -134,11 +149,25 @@ async function callEdgeFunction(input) {
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
     body: JSON.stringify(input),
   });
-  if (!res.ok) throw new Error(`Edge function returned ${res.status}`);
+  if (!res.ok) {
+    const err = new Error(`Edge function returned ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
   const result = await res.json();
   return result.data || result;
 }
 
+// ---------- Main Public API ----------
+
+/**
+ * Generate a nutrition plan. Uses AI Request Manager for:
+ * - Request deduplication
+ * - Throttling (no parallel requests)
+ * - Retry with exponential backoff
+ * - Caching (30-minute TTL for nutrition plans)
+ * - Triple fallback: Edge Function → Server Proxy → Local BMR
+ */
 export async function generateNutritionPlan(onboardingData) {
   const sanitized = sanitizeUserData(onboardingData);
   const errors = validateNutritionInput(sanitized);
@@ -147,22 +176,80 @@ export async function generateNutritionPlan(onboardingData) {
     return fail('MISSING_DATA', 'Missing required fields: age, weight, height, goal, activity_level');
 
   try {
-    // Triple fallback: Edge Function → Server Proxy → Local BMR Calculation
-    let plan;
-    try {
-      plan = await callEdgeFunction(sanitized);
-    } catch {
-      try {
-        plan = await callServerProxy(sanitized);
-      } catch {
-        plan = generateFallbackPlan(sanitized);
-      }
-    }
+    // Use the AI Request Manager with 30-minute cache
+    const plan = await makeAIRequest(
+      'nutrition-plan',
+      sanitized,
+      async () => {
+        // Triple fallback: Edge Function → Server Proxy → Local BMR Calculation
+        try {
+          return await callEdgeFunction(sanitized);
+        } catch (edgeErr) {
+          console.warn('[AI] Edge function failed, trying server proxy:', edgeErr.message);
+          try {
+            return await callServerProxy(sanitized);
+          } catch (proxyErr) {
+            console.warn('[AI] Server proxy failed, using local fallback:', proxyErr.message);
+            return generateFallbackPlan(sanitized);
+          }
+        }
+      },
+      { cacheTTL: 30 * 60 * 1000 } // 30-minute cache for nutrition plans
+    );
+
     return ok('Nutrition plan generated.', plan);
   } catch (e) {
-    return fail('AI_ERROR', e.message || 'Failed to generate plan', e);
+    // Final safety net: local fallback if manager itself fails
+    console.error('[AI] Request manager failed, using emergency fallback:', e.message);
+    const fallbackPlan = generateFallbackPlan(sanitized);
+    return ok('Nutrition plan generated (local calculation).', fallbackPlan);
   }
 }
+
+/**
+ * Generate a nutrition plan that runs ONCE per onboarding session.
+ * Uses makeOneShotAIRequest to prevent duplicate AI calls.
+ * The lock is cleared when user explicitly wants to regenerate.
+ */
+export async function generateOnboardingPlan(onboardingData) {
+  const sanitized = sanitizeUserData(onboardingData);
+  const errors = validateNutritionInput(sanitized);
+  if (errors.length > 0) return fail('VALIDATION_ERROR', 'Invalid data: ' + errors.join(', '), { validationErrors: errors });
+  if (!sanitized.age || !sanitized.weight || !sanitized.height || !sanitized.goal || !sanitized.activity_level)
+    return fail('MISSING_DATA', 'Missing required fields: age, weight, height, goal, activity_level');
+
+  try {
+    const plan = await makeOneShotAIRequest(
+      'onboarding-plan',
+      async () => {
+        try {
+          return await callEdgeFunction(sanitized);
+        } catch {
+          try {
+            return await callServerProxy(sanitized);
+          } catch {
+            return generateFallbackPlan(sanitized);
+          }
+        }
+      }
+    );
+
+    return ok('Nutrition plan generated.', plan);
+  } catch (e) {
+    console.error('[AI] Onboarding plan generation failed:', e.message);
+    const fallbackPlan = generateFallbackPlan(sanitized);
+    return ok('Nutrition plan generated (local calculation).', fallbackPlan);
+  }
+}
+
+/**
+ * Clear the onboarding plan lock (for regeneration)
+ */
+export function resetOnboardingLock() {
+  clearOneShotLock('onboarding-plan');
+}
+
+// ---------- Profile Operations (no AI calls, just DB) ----------
 
 export async function saveNutritionProfile(nutritionData) {
   if (!isConfigured) return fail('SUPABASE_NOT_CONFIGURED', 'Supabase not available');
@@ -184,26 +271,74 @@ export async function saveNutritionProfile(nutritionData) {
 
   const { data, error } = await supabase.from('user_profiles').upsert(payload, { onConflict: 'user_id' }).select().single();
   if (error) return fail('DATABASE_ERROR', 'Failed to save profile', error);
+  
+  // Clear cached profile data since it's been updated
+  clearAICache();
+  
   return ok('Profile saved.', data);
 }
+
+// In-memory profile cache to avoid repeated DB calls on each navigation
+let profileCache = { data: null, timestamp: 0, userId: null };
+const PROFILE_CACHE_TTL = 60000; // 1 minute
 
 export async function getNutritionProfile() {
   if (!isConfigured) return fail('SUPABASE_NOT_CONFIGURED', 'Supabase not available');
   const { data: { user }, error: userErr } = await supabase.auth.getUser();
   if (userErr || !user) return fail('NOT_AUTHENTICATED', 'Must be logged in', userErr);
 
+  // Check in-memory profile cache
+  const now = Date.now();
+  if (profileCache.userId === user.id && profileCache.data && (now - profileCache.timestamp) < PROFILE_CACHE_TTL) {
+    return profileCache.data;
+  }
+
   const { data, error } = await supabase.from('user_profiles').select('*').eq('user_id', user.id).single();
   if (error) {
-    if (error.code === 'PGRST116') return ok('No profile found.', { profile: null });
+    if (error.code === 'PGRST116') {
+      const result = ok('No profile found.', { profile: null });
+      profileCache = { data: result, timestamp: now, userId: user.id };
+      return result;
+    }
     return fail('DATABASE_ERROR', 'Failed to fetch profile', error);
   }
-  return ok('Profile fetched.', { profile: data });
+  
+  const result = ok('Profile fetched.', { profile: data });
+  profileCache = { data: result, timestamp: now, userId: user.id };
+  return result;
 }
 
+// Onboarding check cache (avoid repeated checks during navigation)
+let onboardingCache = { result: null, timestamp: 0, userId: null };
+const ONBOARDING_CACHE_TTL = 30000; // 30 seconds
+
 export async function checkOnboardingCompleted() {
-  const result = await getNutritionProfile();
-  if (result.success && result.data.profile) {
-    return ok('Status retrieved.', { completed: result.data.profile.onboarding_completed === true });
+  if (!isConfigured) return ok('Not completed.', { completed: false });
+  
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return ok('Not completed.', { completed: false });
+  
+  const now = Date.now();
+  if (onboardingCache.userId === user.id && onboardingCache.result && (now - onboardingCache.timestamp) < ONBOARDING_CACHE_TTL) {
+    return onboardingCache.result;
   }
-  return ok('Not completed.', { completed: false });
+
+  const result = await getNutritionProfile();
+  let onboardingResult;
+  if (result.success && result.data.profile) {
+    onboardingResult = ok('Status retrieved.', { completed: result.data.profile.onboarding_completed === true });
+  } else {
+    onboardingResult = ok('Not completed.', { completed: false });
+  }
+  
+  onboardingCache = { result: onboardingResult, timestamp: now, userId: user.id };
+  return onboardingResult;
+}
+
+/**
+ * Invalidate all profile and onboarding caches (e.g. after saving profile)
+ */
+export function invalidateProfileCache() {
+  profileCache = { data: null, timestamp: 0, userId: null };
+  onboardingCache = { result: null, timestamp: 0, userId: null };
 }

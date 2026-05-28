@@ -3,16 +3,21 @@
  * Multi-step onboarding with premium UI, data collection for AI plan generation.
  * Preserved onboarding logic from original FitLife project.
  */
-import { generateNutritionPlan, saveNutritionProfile } from '../../services/ai.js';
+import { generateOnboardingPlan, saveNutritionProfile, resetOnboardingLock, invalidateProfileCache } from '../../services/ai.js';
 import { navigate } from '../../services/router.js';
 
 let currentStep = 1;
 const totalSteps = 5;
 let onboardingData = {};
 
+let isGenerating = false; // Lock to prevent duplicate plan generation
+
 export function renderOnboarding() {
   currentStep = 1;
   onboardingData = {};
+  isGenerating = false;
+  // Clear the one-shot lock so a fresh onboarding can generate a new plan
+  resetOnboardingLock();
   setTimeout(() => initOnboarding(), 50);
   return buildStepHTML();
 }
@@ -302,23 +307,30 @@ function initOnboarding() {
       currentStep++;
       updateStep();
     } else {
+      // Prevent duplicate generation (double-click protection)
+      if (isGenerating) return;
+      isGenerating = true;
+      
       // Generate plan
       collectInputValues();
       const btn = document.getElementById('nextStepBtn');
       btn.disabled = true;
       btn.innerHTML = '<span class="material-symbols-outlined animate-spin text-lg">progress_activity</span><span>Generating AI Plan...</span>';
       
-      const result = await generateNutritionPlan(onboardingData);
+      // Use one-shot AI request (runs AT MOST ONCE per session)
+      const result = await generateOnboardingPlan(onboardingData);
       if (result.success) {
         // Save the plan data for the plan page
         const planData = { ...onboardingData, ...result.data };
         sessionStorage.setItem('fitlife-plan', JSON.stringify(planData));
         
-        // Save to database
+        // Save to database and invalidate caches
         await saveNutritionProfile(planData);
+        invalidateProfileCache();
         
         navigate('/plan');
       } else {
+        isGenerating = false;
         btn.disabled = false;
         btn.innerHTML = 'Generate My AI Plan <span class="material-symbols-outlined text-lg">auto_awesome</span>';
         alert('Failed to generate plan: ' + result.message);

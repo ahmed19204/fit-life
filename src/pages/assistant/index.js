@@ -2,12 +2,14 @@
  * FitLife AI Coach Assistant
  * Real AI-powered nutrition assistant via server-side proxy.
  * SECURITY: No API keys in frontend — calls /api/ai-chat.
+ * Uses AI Request Manager for throttling, dedup, and retry.
  * Supports conversation history, quick prompts, and contextual advice.
  */
 import { renderNavBar } from '../../components/nav-bar.js';
 import { renderPageHeader } from '../../components/page-header.js';
 import { getNutritionProfile } from '../../services/ai.js';
 import { getCurrentUser, getDisplayName } from '../../services/auth.js';
+import { makeDebouncedAIRequest } from '../../services/ai-request-manager.js';
 
 const QUICK_PROMPTS = [
   { icon: 'restaurant', text: 'What should I eat for lunch today?' },
@@ -21,6 +23,7 @@ const QUICK_PROMPTS = [
 let chatHistory = [];
 let userProfile = null;
 let userName = 'there';
+let isSending = false; // Lock to prevent parallel sends
 
 function escapeHtml(text) {
   const div = document.createElement('div');
@@ -29,7 +32,6 @@ function escapeHtml(text) {
 }
 
 function formatResponse(text) {
-  // Convert markdown-like formatting to HTML
   return text
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.*?)\*/g, '<em>$1</em>')
@@ -84,18 +86,37 @@ async function callAI(message) {
   contents.push({ role: 'user', parts: [{ text: message }] });
 
   try {
-    const res = await fetch('/api/ai-chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents }),
-    });
+    // Use AI Request Manager with debounce to prevent rapid-fire
+    const result = await makeDebouncedAIRequest(
+      'chat',
+      message, // Use message as payload for dedup (same question = cached answer)
+      async () => {
+        const res = await fetch('/api/ai-chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents }),
+        });
 
-    if (!res.ok) throw new Error(`Server returned ${res.status}`);
-    const result = await res.json();
-    if (!result.success) throw new Error(result.message || 'AI error');
-    return result.text || "I couldn't generate a response. Please try again.";
+        if (!res.ok) {
+          const err = new Error(`Server returned ${res.status}`);
+          err.status = res.status;
+          throw err;
+        }
+        const data = await res.json();
+        if (!data.success) throw new Error(data.message || 'AI error');
+        return data.text || "I couldn't generate a response. Please try again.";
+      },
+      { cacheTTL: 2 * 60 * 1000 } // 2 minute cache for chat responses
+    );
+    return result;
   } catch (e) {
     console.error('[AI Coach] Error:', e);
+    if (e.message?.includes('busy') || e.message?.includes('queue')) {
+      return "I'm processing your request. Please wait a moment and try again.";
+    }
+    if (e.message?.includes('429') || e.message?.includes('rate')) {
+      return "I'm taking a short breather to stay responsive. Please try again in a few seconds.";
+    }
     return "Sorry, I'm having trouble connecting right now. Please try again in a moment.";
   }
 }
@@ -128,7 +149,8 @@ function setupEvents() {
   if (!input || !sendBtn || !chatArea) return;
 
   async function sendMessage(text) {
-    if (!text.trim()) return;
+    if (!text.trim() || isSending) return; // Prevent parallel sends
+    isSending = true;
     input.value = '';
     input.disabled = true;
     sendBtn.disabled = true;
@@ -168,6 +190,7 @@ function setupEvents() {
     const quickPromptsEl = document.getElementById('quickPrompts');
     if (quickPromptsEl) quickPromptsEl.style.display = 'none';
 
+    isSending = false;
     input.disabled = false;
     sendBtn.disabled = false;
     input.focus();
@@ -257,6 +280,7 @@ export async function renderAssistant() {
   // Clear chat handler
   window._clearChat = () => {
     chatHistory = [];
+    isSending = false;
     window.location.hash = '/assistant';
   };
 
