@@ -1,32 +1,46 @@
 /**
  * FitLife Streaks & Achievements Page
- * Gamification: daily streaks, badges, milestones, and achievement tracking.
+ * Enhanced gamification: daily streaks, smart badges, milestones,
+ * consistency scoring, and meal logging achievements.
  */
 import { renderPageHeader } from '../../components/page-header.js';
+import { renderNavBar } from '../../components/nav-bar.js';
 import { getNutritionProfile } from '../../services/ai.js';
-import { getRecentMeals } from '../../services/meals.js';
+import { getRecentMeals, getDailyNutritionSummary } from '../../services/meals.js';
 
 const ACHIEVEMENTS = [
-  { icon: 'local_fire_department', title: 'First Flame', desc: 'Log meals for 3 consecutive days', threshold: 3, color: 'from-orange-500/20 to-orange-600/10', iconColor: 'text-orange-400' },
-  { icon: 'bolt', title: 'Week Warrior', desc: 'Complete a full week of logging', threshold: 7, color: 'from-yellow-500/20 to-yellow-600/10', iconColor: 'text-yellow-400' },
-  { icon: 'diamond', title: 'Diamond Streak', desc: 'Maintain a 30-day streak', threshold: 30, color: 'from-cyan-400/20 to-cyan-500/10', iconColor: 'text-cyan-400' },
-  { icon: 'military_tech', title: 'Elite Tracker', desc: 'Log 100 total meals', threshold: 100, color: 'from-primary/20 to-primary-container/10', iconColor: 'text-primary' },
-  { icon: 'psychology', title: 'AI Explorer', desc: 'Generate your first AI meal plan', threshold: 1, color: 'from-purple-500/20 to-purple-600/10', iconColor: 'text-purple-400' },
-  { icon: 'target', title: 'Goal Crusher', desc: 'Hit your calorie target 10 times', threshold: 10, color: 'from-primary/20 to-secondary/10', iconColor: 'text-secondary' },
+  { icon: 'local_fire_department', title: 'First Flame', desc: 'Log meals for 3 consecutive days', threshold: 3, type: 'streak', color: 'from-orange-500/20 to-orange-600/10', iconColor: 'text-orange-400' },
+  { icon: 'bolt', title: 'Week Warrior', desc: 'Complete a full week of logging', threshold: 7, type: 'streak', color: 'from-yellow-500/20 to-yellow-600/10', iconColor: 'text-yellow-400' },
+  { icon: 'diamond', title: 'Diamond Streak', desc: 'Maintain a 30-day streak', threshold: 30, type: 'streak', color: 'from-cyan-400/20 to-cyan-500/10', iconColor: 'text-cyan-400' },
+  { icon: 'military_tech', title: 'Elite Tracker', desc: 'Log 100 total meals', threshold: 100, type: 'meals', color: 'from-primary/20 to-primary-container/10', iconColor: 'text-primary' },
+  { icon: 'psychology', title: 'AI Explorer', desc: 'Generate your AI meal plan', threshold: 1, type: 'onboarding', color: 'from-purple-500/20 to-purple-600/10', iconColor: 'text-purple-400' },
+  { icon: 'target', title: 'Goal Crusher', desc: 'Hit your calorie target', threshold: 1, type: 'target', color: 'from-primary/20 to-secondary/10', iconColor: 'text-secondary' },
+  { icon: 'restaurant', title: 'Meal Master', desc: 'Log 50 meals total', threshold: 50, type: 'meals', color: 'from-emerald-500/20 to-emerald-600/10', iconColor: 'text-emerald-400' },
+  { icon: 'photo_camera', title: 'AI Scanner', desc: 'Analyze 10 meals with AI', threshold: 10, type: 'ai_meals', color: 'from-blue-500/20 to-blue-600/10', iconColor: 'text-blue-400' },
 ];
 
 export async function renderStreaks() {
-  const mealsRes = await getRecentMeals(100);
+  const [mealsRes, profileRes, todayRes] = await Promise.all([
+    getRecentMeals(200),
+    getNutritionProfile(),
+    getDailyNutritionSummary(),
+  ]);
+
   const meals = mealsRes.data?.meals || [];
   const totalMeals = meals.length;
+  const aiMeals = meals.filter(m => m.aiSuggested).length;
+  const profile = profileRes.data?.profile || {};
+  const hasProfile = profile.onboarding_completed;
+  const todayCalories = todayRes.data?.calories || 0;
+  const targetCalories = profile.calories || 2000;
+  const hitTarget = todayCalories >= targetCalories * 0.9; // 90% counts
 
-  const profileRes = await getNutritionProfile();
-  const hasProfile = profileRes.data?.profile?.onboarding_completed;
-
-  // Calculate streak (simplified: count consecutive days from today)
+  // Calculate streak
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   let streak = 0;
+  let bestStreak = 0;
+  let currentStreak = 0;
   const daySet = new Set();
   meals.forEach(m => {
     const d = new Date(m.created_at);
@@ -34,6 +48,7 @@ export async function renderStreaks() {
     daySet.add(d.toISOString());
   });
 
+  // Current streak from today backwards
   for (let i = 0; i < 365; i++) {
     const check = new Date(today);
     check.setDate(check.getDate() - i);
@@ -45,7 +60,24 @@ export async function renderStreaks() {
     }
   }
 
-  // Calculate weekly activity (last 7 days)
+  // Best streak: scan all days
+  const sortedDays = Array.from(daySet).sort();
+  let tempStreak = 0;
+  for (let i = 0; i < sortedDays.length; i++) {
+    if (i === 0) { tempStreak = 1; continue; }
+    const prev = new Date(sortedDays[i - 1]);
+    const curr = new Date(sortedDays[i]);
+    const diff = (curr - prev) / (24 * 60 * 60 * 1000);
+    if (diff === 1) {
+      tempStreak++;
+    } else {
+      bestStreak = Math.max(bestStreak, tempStreak);
+      tempStreak = 1;
+    }
+  }
+  bestStreak = Math.max(bestStreak, tempStreak, streak);
+
+  // Weekly activity
   const weekDays = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
   const weekActivity = [];
   for (let i = 6; i >= 0; i--) {
@@ -59,8 +91,11 @@ export async function renderStreaks() {
     });
   }
 
+  // Consistency score
+  const consistencyScore = Math.round((weekActivity.filter(d => d.active).length / 7) * 100);
+
   return `
-    <div class="min-h-screen bg-surface text-on-surface pb-8">
+    <div class="min-h-screen bg-surface text-on-surface pb-24">
       ${renderPageHeader({ title: 'Streaks & Achievements', showBack: true })}
 
       <div class="px-5 py-5 space-y-5">
@@ -80,7 +115,10 @@ export async function renderStreaks() {
 
         <!-- Weekly Activity -->
         <div class="p-4 rounded-xl border border-outline-variant/10 bg-surface-container-low/30">
-          <h3 class="text-xs font-bold text-on-surface-variant uppercase tracking-wider mb-3">This Week</h3>
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-xs font-bold text-on-surface-variant uppercase tracking-wider">This Week</h3>
+            <span class="text-xs font-bold text-primary">${consistencyScore}% consistent</span>
+          </div>
           <div class="flex items-center justify-between">
             ${weekActivity.map(d => `
               <div class="flex flex-col items-center gap-1.5">
@@ -93,17 +131,18 @@ export async function renderStreaks() {
           </div>
         </div>
 
-        <!-- Stats -->
-        <div class="grid grid-cols-3 gap-3">
+        <!-- Stats Grid -->
+        <div class="grid grid-cols-4 gap-2">
           ${[
             { label: 'Total Meals', value: totalMeals, icon: 'restaurant' },
-            { label: 'Best Streak', value: `${streak}d`, icon: 'emoji_events' },
+            { label: 'Current', value: `${streak}d`, icon: 'local_fire_department' },
+            { label: 'Best', value: `${bestStreak}d`, icon: 'emoji_events' },
             { label: 'Active Days', value: daySet.size, icon: 'calendar_month' },
           ].map(s => `
-            <div class="p-3 rounded-xl border border-outline-variant/10 bg-surface-container-low/30 text-center">
-              <span class="material-symbols-outlined text-primary text-lg mb-1 block">${s.icon}</span>
-              <p class="text-lg font-bold text-on-surface">${s.value}</p>
-              <p class="text-[10px] text-on-surface-variant">${s.label}</p>
+            <div class="p-2.5 rounded-xl border border-outline-variant/10 bg-surface-container-low/30 text-center">
+              <span class="material-symbols-outlined text-primary text-base mb-1 block">${s.icon}</span>
+              <p class="text-base font-bold text-on-surface">${s.value}</p>
+              <p class="text-[9px] text-on-surface-variant">${s.label}</p>
             </div>
           `).join('')}
         </div>
@@ -114,11 +153,11 @@ export async function renderStreaks() {
           <div class="space-y-2">
             ${ACHIEVEMENTS.map(ach => {
               let progress = 0;
-              if (ach.title === 'Elite Tracker') progress = Math.min(100, Math.round((totalMeals / ach.threshold) * 100));
-              else if (ach.title === 'AI Explorer') progress = hasProfile ? 100 : 0;
-              else if (ach.title.includes('Streak') || ach.title.includes('Flame') || ach.title.includes('Warrior'))
-                progress = Math.min(100, Math.round((streak / ach.threshold) * 100));
-              else progress = Math.min(100, Math.round((totalMeals / ach.threshold) * 100));
+              if (ach.type === 'meals') progress = Math.min(100, Math.round((totalMeals / ach.threshold) * 100));
+              else if (ach.type === 'ai_meals') progress = Math.min(100, Math.round((aiMeals / ach.threshold) * 100));
+              else if (ach.type === 'onboarding') progress = hasProfile ? 100 : 0;
+              else if (ach.type === 'target') progress = hitTarget ? 100 : Math.min(99, Math.round((todayCalories / targetCalories) * 100));
+              else if (ach.type === 'streak') progress = Math.min(100, Math.round((streak / ach.threshold) * 100));
               const unlocked = progress >= 100;
 
               return `
@@ -144,5 +183,7 @@ export async function renderStreaks() {
           </div>
         </div>
       </div>
+
+      ${renderNavBar()}
     </div>`;
 }

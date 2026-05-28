@@ -5,6 +5,7 @@
 import { setContainer, registerRoutes, setBeforeEach, start, navigate } from './services/router.js';
 import { isLoggedIn, onAuthStateChange, setupSessionRefresh } from './services/auth.js';
 import { checkOnboardingCompleted } from './services/ai.js';
+import { checkDayChange } from './services/meals.js';
 
 // Page imports
 import { renderSplash } from './pages/splash/index.js';
@@ -117,6 +118,19 @@ async function init() {
 
   // Setup session refresh on tab reactivation
   setupSessionRefresh();
+  
+  // Check for day change on tab visibility (daily reset)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      if (checkDayChange()) {
+        // Day changed — re-render current page to refresh daily data
+        const currentHash = window.location.hash.slice(1) || '/';
+        if (currentHash === '/dashboard') {
+          window.dispatchEvent(new HashChangeEvent('hashchange'));
+        }
+      }
+    }
+  });
 
   // Check if user is already logged in on initial load
   const hash = window.location.hash.slice(1) || '/';

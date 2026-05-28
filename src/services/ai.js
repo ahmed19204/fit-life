@@ -342,3 +342,187 @@ export function invalidateProfileCache() {
   profileCache = { data: null, timestamp: 0, userId: null };
   onboardingCache = { result: null, timestamp: 0, userId: null };
 }
+
+// ---------- AI Food Analysis (Image & Text) ----------
+
+/**
+ * Analyze food from an image (base64). 
+ * Sends to /api/ai-food-analyze server-side proxy → Gemini Vision.
+ */
+export async function analyzeImageMeal(base64Image) {
+  if (!base64Image) return fail('MISSING_DATA', 'No image provided');
+
+  try {
+    const result = await makeAIRequest(
+      'food-image-analysis',
+      base64Image.slice(0, 100), // Use prefix for cache key (full image too large)
+      async () => {
+        const res = await fetch('/api/ai-food-analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: base64Image, mode: 'image' }),
+        });
+        if (!res.ok) {
+          const err = new Error(`Server returned ${res.status}`);
+          err.status = res.status;
+          throw err;
+        }
+        const data = await res.json();
+        if (!data.success) throw new Error(data.message || 'Analysis failed');
+        return data.data;
+      },
+      { cacheTTL: 5 * 60 * 1000, skipCache: true } // Don't cache images (each is unique)
+    );
+    return ok('Image analysis complete.', result);
+  } catch (e) {
+    console.error('[AI] Image analysis failed:', e.message);
+    return fail('AI_ERROR', e.message?.includes('429') ? 'AI service busy. Try again shortly.' : 'Image analysis failed. Please try again.');
+  }
+}
+
+/**
+ * Analyze food from a text description.
+ * Sends to /api/ai-food-analyze server-side proxy → Gemini.
+ */
+export async function analyzeTextMeal(description) {
+  if (!description || typeof description !== 'string' || description.trim().length < 3) {
+    return fail('MISSING_DATA', 'Please describe your meal in more detail.');
+  }
+
+  try {
+    const result = await makeAIRequest(
+      'food-text-analysis',
+      description.trim(),
+      async () => {
+        const res = await fetch('/api/ai-food-analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ description: description.trim(), mode: 'text' }),
+        });
+        if (!res.ok) {
+          const err = new Error(`Server returned ${res.status}`);
+          err.status = res.status;
+          throw err;
+        }
+        const data = await res.json();
+        if (!data.success) throw new Error(data.message || 'Analysis failed');
+        return data.data;
+      },
+      { cacheTTL: 5 * 60 * 1000 } // 5 minute cache for same descriptions
+    );
+    return ok('Text analysis complete.', result);
+  } catch (e) {
+    console.error('[AI] Text analysis failed:', e.message);
+    return fail('AI_ERROR', e.message?.includes('429') ? 'AI service busy. Try again shortly.' : 'Meal analysis failed. Please try again.');
+  }
+}
+
+// ---------- AI Recipe Generation ----------
+
+/**
+ * Generate a recipe from ingredients using AI.
+ */
+export async function generateRecipeFromIngredients(ingredients, profile = {}) {
+  if (!ingredients || ingredients.trim().length < 3) {
+    return fail('MISSING_DATA', 'Please provide some ingredients.');
+  }
+
+  try {
+    const result = await makeAIRequest(
+      'recipe-generate',
+      ingredients.trim(),
+      async () => {
+        const diet = profile.diet_type || 'balanced';
+        const goal = profile.goal || 'improve-health';
+        const restrictions = (profile.restrictions || []).join(', ') || 'none';
+        
+        const prompt = `You are a professional chef and nutritionist. Create a recipe using these ingredients: ${ingredients.trim()}.
+User profile: Diet: ${diet}, Goal: ${goal}, Restrictions: ${restrictions}.
+
+Return ONLY valid JSON:
+{"name":"Recipe name","prepTime":"X min","cookTime":"X min","servings":number,"calories":number,"protein":number,"carbs":number,"fat":number,"ingredients":["amount ingredient"],"instructions":["step 1","step 2"],"tips":"Optional cooking tip"}
+
+Keep it practical and healthy. ONLY JSON, no markdown.`;
+
+        const res = await fetch('/api/ai-nutrition', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt }),
+        });
+        if (!res.ok) throw new Error(`Server returned ${res.status}`);
+        const data = await res.json();
+        if (!data.success) throw new Error(data.message || 'Generation failed');
+        return data.data;
+      },
+      { cacheTTL: 10 * 60 * 1000 }
+    );
+    return ok('Recipe generated.', result);
+  } catch (e) {
+    console.error('[AI] Recipe generation failed:', e.message);
+    return fail('AI_ERROR', 'Recipe generation failed. Please try again.');
+  }
+}
+
+// ---------- Profile Update with Recalculation ----------
+
+/**
+ * Update specific profile fields and recalculate nutrition targets if needed.
+ */
+export async function updateProfileField(updates) {
+  if (!isConfigured) return fail('SUPABASE_NOT_CONFIGURED', 'Supabase not available');
+  const { data: { user }, error: userErr } = await supabase.auth.getUser();
+  if (userErr || !user) return fail('NOT_AUTHENTICATED', 'Must be logged in', userErr);
+
+  // Get current profile first
+  const currentRes = await getNutritionProfile();
+  const current = currentRes.data?.profile || {};
+
+  const merged = { ...current, ...updates };
+
+  // Recalculate nutrition targets if body metrics or goals changed
+  const needsRecalc = ['weight', 'height', 'age', 'goal', 'activity_level', 'gender'].some(
+    k => updates[k] !== undefined && updates[k] !== current[k]
+  );
+
+  if (needsRecalc && merged.weight && merged.height && merged.age) {
+    const bmr = calculateBMR(merged.weight, merged.height, merged.age, merged.gender);
+    const tdee = bmr * getActivityMultiplier(merged.activity_level);
+    const targetCalories = Math.round(tdee * getGoalAdjustment(merged.goal));
+    const macros = calculateMacros(targetCalories, merged.goal);
+    merged.calories = targetCalories;
+    merged.protein = macros.protein;
+    merged.carbs = macros.carbs;
+    merged.fat = macros.fat;
+  }
+
+  const payload = {
+    user_id: user.id,
+    age: merged.age || null,
+    weight: merged.weight || null,
+    height: merged.height || null,
+    goal: merged.goal || null,
+    activity_level: merged.activity_level || null,
+    diet_type: merged.diet_type || 'balanced',
+    restrictions: merged.restrictions || [],
+    health_conditions: merged.health_conditions || [],
+    meals_per_day: merged.meals_per_day || 3,
+    calories: merged.calories || null,
+    protein: merged.protein || null,
+    carbs: merged.carbs || null,
+    fat: merged.fat || null,
+    meal_plan: merged.meal_plan || [],
+    onboarding_completed: merged.onboarding_completed ?? true,
+    gender: merged.gender || null,
+    avatar_url: merged.avatar_url || null,
+    full_name: updates.full_name || merged.full_name || null,
+  };
+
+  const { data, error } = await supabase.from('user_profiles').upsert(payload, { onConflict: 'user_id' }).select().single();
+  if (error) return fail('DATABASE_ERROR', 'Failed to update profile', error);
+
+  // Clear caches
+  clearAICache();
+  invalidateProfileCache();
+
+  return ok('Profile updated.', { profile: data, recalculated: needsRecalc });
+}

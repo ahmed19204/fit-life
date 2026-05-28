@@ -1,12 +1,44 @@
 /**
  * FitLife Dashboard
- * Main dashboard with Stitch Premium UI - command center for health metrics.
+ * Main dashboard with Stitch Premium UI — command center for health metrics.
+ * Features: calorie ring, macros, today's meals with food icons,
+ * auto day-change detection, quick actions.
  */
 import { getCurrentUser, getDisplayName } from '../../services/auth.js';
 import { getNutritionProfile, checkOnboardingCompleted } from '../../services/ai.js';
-import { getDailyNutritionSummary } from '../../services/meals.js';
+import { getDailyNutritionSummary, checkDayChange } from '../../services/meals.js';
 import { renderNavBar } from '../../components/nav-bar.js';
 import { navigate } from '../../services/router.js';
+import { on, EVENTS } from '../../services/events.js';
+
+// Food name → Material icon (shared with history)
+const FOOD_ICON_MAP = [
+  { keywords: ['pizza'], icon: 'local_pizza' },
+  { keywords: ['burger', 'hamburger'], icon: 'lunch_dining' },
+  { keywords: ['salad', 'lettuce'], icon: 'eco' },
+  { keywords: ['chicken', 'turkey', 'poultry'], icon: 'kebab_dining' },
+  { keywords: ['steak', 'beef', 'meat'], icon: 'restaurant' },
+  { keywords: ['fish', 'salmon', 'tuna', 'sushi'], icon: 'set_meal' },
+  { keywords: ['rice', 'bowl', 'quinoa'], icon: 'rice_bowl' },
+  { keywords: ['soup', 'stew'], icon: 'soup_kitchen' },
+  { keywords: ['cake', 'dessert', 'sweet', 'cookie'], icon: 'cake' },
+  { keywords: ['smoothie', 'shake', 'juice', 'drink'], icon: 'local_drink' },
+  { keywords: ['coffee', 'latte', 'tea'], icon: 'coffee' },
+  { keywords: ['egg', 'omelette'], icon: 'egg_alt' },
+  { keywords: ['bread', 'toast', 'sandwich', 'wrap'], icon: 'bakery_dining' },
+  { keywords: ['pasta', 'spaghetti', 'noodle'], icon: 'ramen_dining' },
+  { keywords: ['oats', 'oatmeal', 'cereal'], icon: 'breakfast_dining' },
+];
+
+const MEAL_TYPE_ICONS = { 'Breakfast': 'egg_alt', 'Lunch': 'lunch_dining', 'Dinner': 'dinner_dining', 'Snack': 'cookie' };
+
+function getMealIcon(name, type) {
+  const lower = (name || '').toLowerCase();
+  for (const entry of FOOD_ICON_MAP) {
+    if (entry.keywords.some(k => lower.includes(k))) return entry.icon;
+  }
+  return MEAL_TYPE_ICONS[type] || 'restaurant';
+}
 
 export async function renderDashboard() {
   // Check auth & onboarding
@@ -15,6 +47,9 @@ export async function renderDashboard() {
   
   const onboarding = await checkOnboardingCompleted();
   if (!onboarding.data?.completed) { navigate('/welcome'); return ''; }
+
+  // Check for day change on dashboard load
+  checkDayChange();
 
   const user = userRes.data.user;
   const name = getDisplayName(user);
@@ -28,7 +63,11 @@ export async function renderDashboard() {
   const remaining = Math.max(0, targetCal - consumed);
   const progress = Math.min(100, Math.round((consumed / targetCal) * 100));
 
-  const greeting = new Date().getHours() < 12 ? 'Good Morning' : new Date().getHours() < 17 ? 'Good Afternoon' : 'Good Evening';
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Good Morning' : hour < 17 ? 'Good Afternoon' : 'Good Evening';
+
+  // Date display
+  const dateStr = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
 
   return `
     <div class="min-h-screen bg-surface text-on-surface pb-24">
@@ -38,6 +77,7 @@ export async function renderDashboard() {
           <div>
             <p class="text-xs text-on-surface-variant font-medium uppercase tracking-wider">${greeting}</p>
             <h1 class="text-xl font-bold mt-0.5">${name.split(' ')[0]}</h1>
+            <p class="text-[10px] text-on-surface-variant/60 mt-0.5">${dateStr}</p>
           </div>
           <div class="flex items-center gap-3">
             <button onclick="window.location.hash='/notifications'" class="w-10 h-10 rounded-full bg-surface-container-high/50 flex items-center justify-center text-on-surface-variant hover:text-on-surface transition-colors relative">
@@ -60,13 +100,13 @@ export async function renderDashboard() {
             <div class="relative w-24 h-24 flex-shrink-0">
               <svg class="w-24 h-24 -rotate-90" viewBox="0 0 96 96">
                 <circle cx="48" cy="48" r="42" fill="none" stroke="rgba(75, 226, 119, 0.1)" stroke-width="6"/>
-                <circle cx="48" cy="48" r="42" fill="none" stroke="#22c55e" stroke-width="6" stroke-linecap="round"
-                        stroke-dasharray="${2 * Math.PI * 42}" stroke-dashoffset="${2 * Math.PI * 42 * (1 - progress / 100)}"
+                <circle cx="48" cy="48" r="42" fill="none" stroke="${progress > 100 ? '#ef4444' : '#22c55e'}" stroke-width="6" stroke-linecap="round"
+                        stroke-dasharray="${2 * Math.PI * 42}" stroke-dashoffset="${2 * Math.PI * 42 * (1 - Math.min(progress, 100) / 100)}"
                         class="transition-all duration-1000"/>
               </svg>
               <div class="absolute inset-0 flex flex-col items-center justify-center">
-                <span class="text-lg font-bold text-primary">${progress}%</span>
-                <span class="text-[8px] text-on-surface-variant uppercase">Goal</span>
+                <span class="text-lg font-bold ${progress > 100 ? 'text-error' : 'text-primary'}">${progress}%</span>
+                <span class="text-[8px] text-on-surface-variant uppercase">Today</span>
               </div>
             </div>
             <!-- Stats -->
@@ -81,7 +121,7 @@ export async function renderDashboard() {
               </div>
               <div class="flex justify-between items-baseline">
                 <span class="text-xs text-on-surface-variant">Remaining</span>
-                <span class="text-sm font-semibold text-primary">${remaining.toLocaleString()}</span>
+                <span class="text-sm font-semibold ${remaining === 0 ? 'text-error' : 'text-primary'}">${remaining.toLocaleString()}</span>
               </div>
             </div>
           </div>
@@ -109,7 +149,7 @@ export async function renderDashboard() {
           ${[
             { icon: 'photo_camera', label: 'Scan Meal', desc: 'AI Vision', path: '/meals', color: 'primary' },
             { icon: 'restaurant_menu', label: 'AI Recipes', desc: 'Get Ideas', path: '/recipe', color: 'secondary' },
-            { icon: 'calendar_today', label: 'Daily Meals', desc: 'Meal Plan', path: '/daily-meals', color: 'primary' },
+            { icon: 'calendar_today', label: 'Daily Plan', desc: 'Meal Plan', path: '/daily-meals', color: 'primary' },
             { icon: 'smart_toy', label: 'AI Coach', desc: 'Ask Anything', path: '/assistant', color: 'secondary' },
           ].map(a => `
             <button onclick="window.location.hash='${a.path}'"
@@ -123,22 +163,28 @@ export async function renderDashboard() {
           `).join('')}
         </div>
 
-        <!-- Recent Meals -->
+        <!-- Today's Meals -->
         <div>
           <div class="flex items-center justify-between mb-3">
             <h3 class="text-sm font-bold text-on-surface-variant uppercase tracking-wider">Today's Meals</h3>
-            <button onclick="window.location.hash='/history'" class="text-xs text-primary font-semibold">View All</button>
+            <div class="flex items-center gap-3">
+              <span class="text-[10px] text-primary font-semibold">${summary.mealCount || 0} meals</span>
+              <button onclick="window.location.hash='/history'" class="text-xs text-primary font-semibold">View All</button>
+            </div>
           </div>
           ${(summary.meals || []).length > 0 ? `
             <div class="space-y-2">
-              ${summary.meals.slice(0, 3).map(m => `
+              ${summary.meals.slice(0, 5).map(m => `
                 <div class="flex items-center gap-3 p-3 rounded-xl bg-surface-container-low/30 border border-outline-variant/5">
-                  <div class="w-10 h-10 rounded-lg bg-surface-container-high flex items-center justify-center">
-                    <span class="material-symbols-outlined text-on-surface-variant text-lg">restaurant</span>
+                  <div class="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                    <span class="material-symbols-outlined text-primary text-lg" style="font-variation-settings: 'FILL' 1;">${getMealIcon(m.name, m.type)}</span>
                   </div>
                   <div class="flex-1 min-w-0">
-                    <p class="text-sm font-semibold text-on-surface truncate">${m.name}</p>
-                    <p class="text-[10px] text-on-surface-variant">${m.time || 'No time'} &middot; ${m.type}</p>
+                    <div class="flex items-center gap-1.5">
+                      <p class="text-sm font-semibold text-on-surface truncate">${m.name}</p>
+                      ${m.aiSuggested ? '<span class="material-symbols-outlined text-primary text-xs" style="font-variation-settings: \'FILL\' 1;">auto_awesome</span>' : ''}
+                    </div>
+                    <p class="text-[10px] text-on-surface-variant">${m.time || ''} &middot; ${m.type}</p>
                   </div>
                   <div class="text-right">
                     <p class="text-sm font-bold text-primary">${m.calories}</p>
@@ -159,18 +205,28 @@ export async function renderDashboard() {
         </div>
 
         <!-- Streak Card -->
-        <div class="p-4 rounded-xl border border-outline-variant/10 bg-surface-container-low/30 flex items-center gap-4">
+        <button onclick="window.location.hash='/streaks'" class="w-full p-4 rounded-xl border border-outline-variant/10 bg-surface-container-low/30 flex items-center gap-4 hover:border-primary/20 transition-all">
           <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-orange-500/20 to-orange-600/10 flex items-center justify-center">
             <span class="material-symbols-outlined text-orange-400 text-2xl" style="font-variation-settings: 'FILL' 1;">local_fire_department</span>
           </div>
-          <div class="flex-1">
-            <p class="text-sm font-bold text-on-surface">Keep Your Streak!</p>
+          <div class="flex-1 text-left">
+            <p class="text-sm font-bold text-on-surface">Track Your Streak!</p>
             <p class="text-xs text-on-surface-variant">Log meals daily to build your streak</p>
           </div>
-          <button onclick="window.location.hash='/streaks'" class="text-primary">
-            <span class="material-symbols-outlined">chevron_right</span>
-          </button>
-        </div>
+          <span class="material-symbols-outlined text-on-surface-variant/40">chevron_right</span>
+        </button>
+
+        <!-- Analytics Quick Link -->
+        <button onclick="window.location.hash='/progress'" class="w-full p-4 rounded-xl border border-primary/10 bg-gradient-to-r from-primary/5 to-transparent flex items-center gap-4 hover:from-primary/10 transition-all">
+          <div class="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
+            <span class="material-symbols-outlined text-primary text-2xl" style="font-variation-settings: 'FILL' 1;">monitoring</span>
+          </div>
+          <div class="flex-1 text-left">
+            <p class="text-sm font-bold text-on-surface">Weekly Analytics</p>
+            <p class="text-xs text-on-surface-variant">View charts, trends & progress</p>
+          </div>
+          <span class="material-symbols-outlined text-on-surface-variant/40">chevron_right</span>
+        </button>
       </div>
 
       ${renderNavBar()}
