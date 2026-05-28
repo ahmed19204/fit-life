@@ -1,6 +1,9 @@
 /**
  * FitLife AI Recipe Generator
  * Generate personalized recipes based on user preferences and available ingredients.
+ * 
+ * NOTE: AI recipe generation from ingredients is gated behind Premium.
+ * Sample recipes shown are curated static data. Full AI generation coming with Premium tier.
  */
 import { renderNavBar } from '../../components/nav-bar.js';
 import { renderPageHeader } from '../../components/page-header.js';

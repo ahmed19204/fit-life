@@ -1,6 +1,9 @@
 /**
  * FitLife Notifications Page
  * Shows meal reminders, streak alerts, plan updates, and system notifications.
+ * 
+ * NOTE: Currently uses static placeholder data.
+ * TODO: Integrate with Supabase notifications table when backend is ready.
  */
 import { renderPageHeader } from '../../components/page-header.js';
 

@@ -1,6 +1,9 @@
 /**
  * FitLife Training Performance Page
  * Workout tracking, exercise library, and performance analytics.
+ * 
+ * NOTE: Currently uses static placeholder data for workouts and weekly stats.
+ * TODO: Integrate with Supabase workouts table when backend is ready.
  */
 import { renderNavBar } from '../../components/nav-bar.js';
 import { renderPageHeader } from '../../components/page-header.js';
