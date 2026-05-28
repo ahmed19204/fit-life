@@ -3,7 +3,7 @@
  * Provides offline support, caching strategy, and PWA installability.
  */
 
-const CACHE_VERSION = 'fitlife-v1.0.0';
+const CACHE_VERSION = 'fitlife-v1.1.0';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const DYNAMIC_CACHE = `${CACHE_VERSION}-dynamic`;
 const API_CACHE = `${CACHE_VERSION}-api`;

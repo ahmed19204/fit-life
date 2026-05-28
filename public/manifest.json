@@ -1,10 +1,12 @@
 {
   "name": "FitLife - AI Fitness Platform",
   "short_name": "FitLife",
+  "id": "fitlife-ai-app",
   "description": "AI-Powered Fitness & Nutrition Platform. Personalized meal plans, intelligent tracking, and real-time insights.",
   "start_url": "/#/dashboard",
   "scope": "/",
   "display": "standalone",
+  "lang": "en",
   "background_color": "#0e150e",
   "theme_color": "#0e150e",
   "orientation": "portrait-primary",
