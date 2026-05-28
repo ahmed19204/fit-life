@@ -1,10 +1,12 @@
 /**
  * FitLife Authentication Service
  * Handles signup, login, logout, session management, and profile sync.
- * Preserved from original FitLife backend - source of truth for auth logic.
+ * Includes session refresh on tab reactivation and OAuth handling.
  */
 import { supabase, isConfigured } from './supabase.js';
 import { ok, fail } from '../utils/response.js';
+import { clearAICache } from './ai-request-manager.js';
+import { invalidateProfileCache } from './ai.js';
 
 function mapAuthError(error, action) {
   const raw = error?.message || 'Unexpected authentication error.';
@@ -110,10 +112,12 @@ export async function signInWithGoogle() {
   if (!isConfigured) return fail('SUPABASE_NOT_CONFIGURED', 'Supabase not ready.');
   
   try {
+    // Use origin without hash — Supabase OAuth drops the hash fragment.
+    // After redirect, the app.js init() detects the logged-in user and routes to /dashboard.
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: `${window.location.origin}/#/dashboard`,
+        redirectTo: window.location.origin,
       },
     });
     if (error) return mapAuthError(error, 'oauth');
@@ -150,6 +154,12 @@ export async function signOut() {
   try {
     const { error } = await supabase.auth.signOut();
     if (error) return mapAuthError(error, 'signout');
+    
+    // Clear all cached data on sign out
+    clearAICache();
+    invalidateProfileCache();
+    sessionStorage.clear();
+    
     return ok('Signed out successfully.');
   } catch (e) {
     return mapAuthError(e, 'signout');
@@ -167,4 +177,32 @@ export function onAuthStateChange(callback) {
 
 export function getDisplayName(user) {
   return user?.user_metadata?.full_name || user?.email || 'FitLife User';
+}
+
+/**
+ * Setup session refresh on tab reactivation.
+ * When user returns to the app tab, refresh the session to prevent stale tokens.
+ * Call this once during app initialization.
+ */
+export function setupSessionRefresh() {
+  if (!isConfigured) return;
+  
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState === 'visible') {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          // Check if token is close to expiring (within 5 minutes)
+          const expiresAt = session.expires_at;
+          const now = Math.floor(Date.now() / 1000);
+          if (expiresAt && (expiresAt - now) < 300) {
+            console.log('[Auth] Session near expiry, refreshing...');
+            await supabase.auth.refreshSession();
+          }
+        }
+      } catch (e) {
+        console.warn('[Auth] Session refresh check failed:', e.message);
+      }
+    }
+  });
 }

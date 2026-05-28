@@ -3,7 +3,7 @@
  * SPA Router setup, auth guards, and page registration.
  */
 import { setContainer, registerRoutes, setBeforeEach, start, navigate } from './services/router.js';
-import { isLoggedIn, onAuthStateChange } from './services/auth.js';
+import { isLoggedIn, onAuthStateChange, setupSessionRefresh } from './services/auth.js';
 import { checkOnboardingCompleted } from './services/ai.js';
 
 // Page imports
@@ -99,7 +99,24 @@ async function init() {
     if (event === 'SIGNED_OUT') {
       navigate('/landing');
     }
+    // Handle OAuth callback — user signed in via Google redirect
+    if (event === 'SIGNED_IN' && session) {
+      const hash = window.location.hash.slice(1) || '/';
+      // If on root or landing after OAuth redirect, go to dashboard
+      if (hash === '/' || hash === '/landing' || hash === '/auth') {
+        checkOnboardingCompleted().then(onboarding => {
+          if (onboarding.data?.completed) {
+            navigate('/dashboard');
+          } else {
+            navigate('/welcome');
+          }
+        }).catch(() => navigate('/dashboard'));
+      }
+    }
   });
+
+  // Setup session refresh on tab reactivation
+  setupSessionRefresh();
 
   // Check if user is already logged in on initial load
   const hash = window.location.hash.slice(1) || '/';
