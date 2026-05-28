@@ -60,9 +60,10 @@ async function handleRouteChange() {
   }
 
   if (handler && appContainer) {
-    // Page transition
+    // Page transition — smooth fade
     appContainer.style.opacity = '0';
-    await new Promise(r => setTimeout(r, 150));
+    appContainer.style.transform = 'translateY(4px)';
+    await new Promise(r => setTimeout(r, 120));
 
     try {
       const content = await handler(path);
@@ -80,6 +81,7 @@ async function handleRouteChange() {
     }
 
     appContainer.style.opacity = '1';
+    appContainer.style.transform = 'translateY(0)';
   }
 }
 

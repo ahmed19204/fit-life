@@ -14,7 +14,7 @@ export async function renderDashboard() {
   if (!userRes.success || !userRes.data.user) { navigate('/auth'); return ''; }
   
   const onboarding = await checkOnboardingCompleted();
-  if (!onboarding.data.completed) { navigate('/welcome'); return ''; }
+  if (!onboarding.data?.completed) { navigate('/welcome'); return ''; }
 
   const user = userRes.data.user;
   const name = getDisplayName(user);

@@ -262,10 +262,11 @@ export async function renderAssistant() {
       <div class="fixed bottom-16 left-0 right-0 px-4 py-3 border-t border-outline-variant/10"
            style="background: rgba(14, 21, 14, 0.95); backdrop-filter: blur(20px);">
         <div class="flex gap-2 max-w-lg mx-auto">
+          <label for="chatInput" class="sr-only">Message AI Coach</label>
           <input type="text" id="chatInput" placeholder="Ask your AI coach..." 
                  class="flex-1 px-4 py-3 rounded-full bg-surface-container-lowest border border-outline-variant/20 text-on-surface text-sm focus:border-primary outline-none"
-                 autocomplete="off">
-          <button id="chatSend" class="w-11 h-11 rounded-full bg-primary-container flex items-center justify-center hover:bg-primary transition-colors">
+                 autocomplete="off" enterkeyhint="send">
+          <button id="chatSend" aria-label="Send message" class="w-11 h-11 rounded-full bg-primary-container flex items-center justify-center hover:bg-primary transition-colors">
             <span class="material-symbols-outlined text-on-primary-container">send</span>
           </button>
         </div>

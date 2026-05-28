@@ -15,13 +15,14 @@ const NAV_ITEMS = [
 export function renderNavBar() {
   const current = getCurrentRoute();
   return `
-    <nav id="bottomNav" class="fixed bottom-0 left-0 right-0 z-50 border-t border-outline-variant/20" 
+    <nav id="bottomNav" role="navigation" aria-label="Main navigation" class="fixed bottom-0 left-0 right-0 z-50 border-t border-outline-variant/20" 
          style="background: rgba(14, 21, 14, 0.95); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);">
       <div class="flex items-center justify-around max-w-lg mx-auto px-2 py-2 pb-safe">
         ${NAV_ITEMS.map(item => {
           const active = current === item.path || (item.path !== '/dashboard' && current?.startsWith(item.path));
           return `
             <button onclick="window.location.hash='${item.path}'" 
+                    aria-label="${item.label}" aria-current="${active ? 'page' : 'false'}"
                     class="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-all duration-200 min-w-[56px]
                            ${active ? 'text-primary' : 'text-on-surface-variant hover:text-on-surface'}">
               <span class="material-symbols-outlined text-[22px] ${active ? 'font-bold' : ''}" 
