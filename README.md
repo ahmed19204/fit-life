@@ -96,45 +96,56 @@ FitLife is a full-featured AI fitness platform with personalized meal plans, int
 - **Styling:** Tailwind CSS (CDN) + "Midnight Emerald" design tokens
 - **Build:** Vite 8.0.14
 - **Backend:** Supabase (Auth + PostgreSQL + RLS + Edge Functions)
-- **AI:** Google Gemini 2.0 Flash (triple fallback: Edge → Vercel → local BMR)
-- **AI Vision:** Gemini 2.0 Flash multimodal (image analysis)
-- **Hosting:** Vercel (Serverless Functions + Static)
+- **AI Primary:** Google Gemini 1.5 Flash (all 5 AI systems)
+- **AI Fallback:** OpenRouter (deepseek-chat-v3 text, llama-3.2-vision images)
+- **AI Architecture:** Unified multi-provider with professional fallback routing
+- **Hosting:** Vercel (Serverless Functions + Static) / Express dev server
 - **PWA:** Service Worker + Web App Manifest
 - **Font:** Plus Jakarta Sans + Material Symbols
 
 ## Security
 
-- ✅ Google AI API key stored server-side only (Vercel environment variables)
+- ✅ All API keys stored server-side only (GEMINI_API_KEY, OPENROUTER_API_KEY, GOOGLE_AI_API_KEY)
 - ✅ No secrets exposed in frontend bundle (verified)
 - ✅ XSS protection in router error handling (HTML entity escaping)
 - ✅ Admin route access enforcement (email whitelist)
 - ✅ Auth guards on all 16 protected routes
 - ✅ Supabase RLS policies for data isolation
 - ✅ Input validation on all user inputs (meals, nutrition data, prompts)
-- ✅ Server-side rate limiting: 5/min (nutrition), 8/min (food analysis), 10/min (chat)
-- ✅ Prompt injection sanitization on all 3 AI API endpoints
+- ✅ Unified rate limiting: 12 req/min/IP across all AI actions
+- ✅ Prompt injection sanitization on all AI endpoints
 - ✅ Image size validation (max 10MB), mime type extraction
 - ✅ Base64 validation on image uploads
+- ✅ AbortController timeout protection (30s per provider attempt)
+- ✅ Error classification: recoverable (429/5xx → fallback) vs client (400/403 → no fallback)
 - ✅ Security headers via vercel.json
 - ✅ Session refresh on tab reactivation
 - ✅ Cache clearing on sign-out
 
-## AI System Architecture
+## AI System Architecture (v3.0 — Multi-Provider)
 
 ```
 User Action → Frontend (ai.js)
   → AI Request Manager (queue, throttle, dedup, cache, retry)
-    → Request Types:
-      1. Nutrition Plan → Triple Fallback: Edge → Proxy → Local BMR
-      2. Food Image Analysis → /api/ai-food-analyze (Gemini Vision)
-      3. Food Text Analysis → /api/ai-food-analyze (Gemini)
-      4. Recipe Generation → /api/ai-nutrition (custom prompt)
-      5. AI Chat → /api/ai-chat (Gemini)
-    → Server-side protections:
-      - In-memory rate limiting per IP
-      - Prompt injection filtering
-      - Content/image sanitization
-      - 429 handling with retryAfter
+    → callUnifiedAI(action, payload)
+      → PRIMARY: /api/ai-unified (Vercel) — Gemini 1.5 Flash
+        → FALLBACK: OpenRouter (auto, on 429/timeout/5xx only)
+          → Text: deepseek/deepseek-chat-v3-0324
+          → Vision: meta-llama/llama-3.2-11b-vision-instruct:free
+      → SECONDARY: Supabase Edge Function (fitlife-ai) — same logic
+      → TERTIARY: Individual Vercel proxies (/api/ai-chat, /api/ai-food-analyze)
+      → FINAL: Local BMR calculation (nutrition only)
+
+  5 AI Operations:
+    1. coach         — AI fitness/nutrition chat
+    2. analyze-image — Food image analysis (Gemini Vision / OpenRouter Vision)
+    3. analyze-text  — Text-based meal analysis
+    4. recipe        — AI recipe generation from ingredients
+    5. nutrition     — Personalized nutrition plan generation
+
+  Provider Router Rules:
+    ✅ Fallback ON:  429 rate limit, timeout, 5xx server error
+    ❌ Fallback OFF: 400 bad request, 401 auth, 403 forbidden
 ```
 
 ## Performance
@@ -169,9 +180,13 @@ src/
 │   └── page-header.js        # Sticky glass header (ARIA accessible)
 └── pages/                    # 19 page modules (one per route)
 api/
-├── ai-nutrition.js           # Vercel: AI nutrition proxy (5 req/min/IP)
-├── ai-chat.js                # Vercel: AI chat proxy (10 req/min/IP)
-└── ai-food-analyze.js        # Vercel: AI food image + text analysis (8 req/min/IP)
+├── ai-unified.js             # Unified multi-provider AI (12 req/min/IP, Gemini→OpenRouter)
+├── ai-nutrition.js           # Legacy Vercel: nutrition proxy fallback (5 req/min/IP)
+├── ai-chat.js                # Legacy Vercel: chat proxy fallback (10 req/min/IP)
+└── ai-food-analyze.js        # Legacy Vercel: food analysis fallback (8 req/min/IP)
+supabase/functions/
+└── fitlife-ai/index.ts       # Edge Function (ready for Supabase deploy, same multi-provider logic)
+server.js                     # Express dev server (API + static, for sandbox)
 public/
 ├── manifest.json             # PWA manifest
 ├── sw.js                     # Service worker v1.1.0
@@ -187,24 +202,32 @@ public/
 -- analysis_history: tracks AI analysis inputs/results
 ```
 
-## Vercel Environment Variables Required
+## Environment Variables Required
 
-```
+```bash
+# Frontend (Vite — exposed to browser)
 VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=your-anon-key
-GOOGLE_AI_API_KEY=your-gemini-api-key
+
+# Server-side only — NOT exposed to browser
+GOOGLE_AI_API_KEY=your-gemini-api-key    # Legacy (individual endpoints)
+GEMINI_API_KEY=your-gemini-api-key        # Unified endpoint primary
+OPENROUTER_API_KEY=your-openrouter-key    # Unified endpoint fallback
 ```
 
 ## Quick Start
 
 ```bash
 npm install
-cp .env.example .env   # Fill in credentials
-npm run build && npx vite preview --host 0.0.0.0 --port 3000
+cp .env.example .env   # Fill in credentials (see Environment Variables above)
+npm run build          # Build frontend (77 modules, ~413 KB)
+node --env-file=.env server.js  # Start with API + static serving
+# Or: pm2 start ecosystem.config.cjs  # Daemonized
 ```
 
 ## Version History
 
+- **v3.0.0** — Multi-Provider AI Backend: Unified endpoint, Gemini+OpenRouter, professional fallback routing
 - **v2.0.0** — Full AI Feature Completion: 10-feature implementation, zero "Coming Soon", all AI features live
 - **v1.2.0** — 10-Part Audit: Performance, security, clean code review
 - **v1.1.0** — Stabilization: Rate limiting, error handling, PWA
