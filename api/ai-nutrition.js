@@ -83,7 +83,7 @@ export default async function handler(req, res) {
       .replace(/system\s*:\s*/gi, '[filtered]')
       .slice(0, 5000);
 
-    const model = 'gemini-2.0-flash';
+    const model = 'gemini-2.5-flash';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
       {
@@ -98,7 +98,9 @@ export default async function handler(req, res) {
 
     if (!response.ok) {
       const status = response.status;
-      console.error('[AI Nutrition] Google AI error:', status);
+      let errBody = '';
+      try { errBody = await response.text(); } catch (_) {}
+      console.error(`[AI Nutrition] Google AI error: ${status}`, errBody.slice(0, 300));
       
       if (status === 429) {
         return res.status(429).json({ 

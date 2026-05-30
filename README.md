@@ -128,7 +128,7 @@ FitLife is a full-featured AI fitness platform with personalized meal plans, int
 User Action → Frontend (ai.js)
   → AI Request Manager (queue, throttle, dedup, cache, retry)
     → callUnifiedAI(action, payload)
-      → PRIMARY: /api/ai-unified (Vercel) — Gemini 1.5 Flash
+      → PRIMARY: /api/ai-unified (Vercel) — Gemini 2.5 Flash
         → FALLBACK: OpenRouter (auto, on 429/timeout/5xx only)
           → Text: deepseek/deepseek-chat-v3-0324
           → Vision: meta-llama/llama-3.2-11b-vision-instruct:free
@@ -227,6 +227,7 @@ node --env-file=.env server.js  # Start with API + static serving
 
 ## Version History
 
+- **v3.1.0** — Gemini Model Fix: Updated all endpoints from deprecated gemini-1.5-flash/2.0-flash to gemini-2.5-flash (GA), added debug logging across all AI endpoints
 - **v3.0.0** — Multi-Provider AI Backend: Unified endpoint, Gemini+OpenRouter, professional fallback routing
 - **v2.0.0** — Full AI Feature Completion: 10-feature implementation, zero "Coming Soon", all AI features live
 - **v1.2.0** — 10-Part Audit: Performance, security, clean code review

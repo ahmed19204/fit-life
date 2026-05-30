@@ -8,7 +8,7 @@
  * Body: { action: "coach"|"analyze-image"|"analyze-text"|"recipe"|"nutrition", ...payload }
  *
  * Provider Strategy:
- *   PRIMARY:  Google Gemini (gemini-1.5-flash)
+ *   PRIMARY:  Google Gemini (gemini-2.5-flash)
  *   FALLBACK: OpenRouter (deepseek-chat-v3 for text, llama-3.2-vision for images)
  *
  * Fallback Rules:
@@ -24,7 +24,7 @@
 
 // ─── CONFIG ─────────────────────────────────────────────────────────────────
 
-const GEMINI_MODEL = 'gemini-1.5-flash';
+const GEMINI_MODEL = 'gemini-2.5-flash';
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_TEXT_MODEL = 'deepseek/deepseek-chat-v3-0324';
@@ -155,14 +155,27 @@ async function geminiGenerateText(apiKey, contents, config = {}) {
   });
 
   if (!res.ok) {
-    const err = new Error(`Gemini returned ${res.status}`);
+    let errBody = '';
+    try { errBody = await res.text(); } catch (_) {}
+    log('error', 'gemini', `Gemini ${res.status} response`, {
+      status: res.status,
+      url: url.replace(/key=[^&]+/, 'key=REDACTED'),
+      body: errBody.slice(0, 500),
+    });
+    const err = new Error(`Gemini returned ${res.status}: ${errBody.slice(0, 200)}`);
     err.status = res.status;
     throw err;
   }
 
   const result = await res.json();
   const text = result?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-  if (!text) throw new Error('Empty Gemini response');
+  if (!text) {
+    log('warn', 'gemini', 'Empty Gemini response', {
+      candidates: JSON.stringify(result?.candidates?.slice(0, 1)).slice(0, 300),
+      promptFeedback: JSON.stringify(result?.promptFeedback).slice(0, 200),
+    });
+    throw new Error('Empty Gemini response');
+  }
 
   return { text, provider: 'gemini' };
 }
@@ -186,14 +199,29 @@ async function geminiAnalyzeImage(apiKey, prompt, imageData, mimeType) {
   });
 
   if (!res.ok) {
-    const err = new Error(`Gemini Vision returned ${res.status}`);
+    let errBody = '';
+    try { errBody = await res.text(); } catch (_) {}
+    log('error', 'gemini-vision', `Gemini Vision ${res.status} response`, {
+      status: res.status,
+      url: url.replace(/key=[^&]+/, 'key=REDACTED'),
+      body: errBody.slice(0, 500),
+      mimeType,
+      imageDataLen: imageData.length,
+    });
+    const err = new Error(`Gemini Vision returned ${res.status}: ${errBody.slice(0, 200)}`);
     err.status = res.status;
     throw err;
   }
 
   const result = await res.json();
   const text = result?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-  if (!text) throw new Error('Empty Gemini Vision response');
+  if (!text) {
+    log('warn', 'gemini-vision', 'Empty Gemini Vision response', {
+      candidates: JSON.stringify(result?.candidates?.slice(0, 1)).slice(0, 300),
+      promptFeedback: JSON.stringify(result?.promptFeedback).slice(0, 200),
+    });
+    throw new Error('Empty Gemini Vision response');
+  }
 
   return { text, provider: 'gemini' };
 }

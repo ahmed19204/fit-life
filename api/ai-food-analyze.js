@@ -114,7 +114,7 @@ export default async function handler(req, res) {
         return res.status(400).json({ success: false, message: 'Image too large. Max 10MB.' });
       }
 
-      const model = 'gemini-2.0-flash';
+      const model = 'gemini-2.5-flash';
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
         {
@@ -134,6 +134,9 @@ export default async function handler(req, res) {
 
       if (!response.ok) {
         const status = response.status;
+        let errBody = '';
+        try { errBody = await response.text(); } catch (_) {}
+        console.error(`[AI Food Image] Google AI error: ${status}`, errBody.slice(0, 300));
         if (status === 429) {
           return res.status(429).json({ success: false, message: 'AI service busy. Try again shortly.', retryAfter: 30 });
         }
@@ -158,7 +161,7 @@ export default async function handler(req, res) {
         return res.status(400).json({ success: false, message: 'Description too short.' });
       }
 
-      const model = 'gemini-2.0-flash';
+      const model = 'gemini-2.5-flash';
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
         {
@@ -173,6 +176,9 @@ export default async function handler(req, res) {
 
       if (!response.ok) {
         const status = response.status;
+        let errBody = '';
+        try { errBody = await response.text(); } catch (_) {}
+        console.error(`[AI Food Text] Google AI error: ${status}`, errBody.slice(0, 300));
         if (status === 429) {
           return res.status(429).json({ success: false, message: 'AI service busy. Try again shortly.', retryAfter: 30 });
         }

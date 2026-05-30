@@ -100,7 +100,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ success: false, message: 'No valid message contents provided.' });
     }
 
-    const model = 'gemini-2.0-flash';
+    const model = 'gemini-2.5-flash';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
       {
@@ -115,7 +115,9 @@ export default async function handler(req, res) {
 
     if (!response.ok) {
       const status = response.status;
-      console.error('[AI Chat] Google AI error:', status);
+      let errBody = '';
+      try { errBody = await response.text(); } catch (_) {}
+      console.error(`[AI Chat] Google AI error: ${status}`, errBody.slice(0, 300));
       
       if (status === 429) {
         return res.status(429).json({ 

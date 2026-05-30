@@ -18,7 +18,7 @@
  *   - Request timeout protection (AbortController)
  *
  * Provider Strategy:
- *   PRIMARY:  Google Gemini (gemini-1.5-flash)
+ *   PRIMARY:  Google Gemini (gemini-2.5-flash)
  *   FALLBACK: OpenRouter (deepseek/deepseek-chat-v3-0324 for text,
  *             meta-llama/llama-3.2-11b-vision-instruct:free for images)
  */
@@ -35,7 +35,7 @@ const CORS_HEADERS = {
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
 
-const GEMINI_MODEL = "gemini-1.5-flash";
+const GEMINI_MODEL = "gemini-2.5-flash";
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1/chat/completions";
 const OPENROUTER_TEXT_MODEL = "deepseek/deepseek-chat-v3-0324";
@@ -170,14 +170,25 @@ async function geminiGenerateText(
   });
 
   if (!res.ok) {
-    const err: any = new Error(`Gemini returned ${res.status}`);
+    let errBody = '';
+    try { errBody = await res.text(); } catch (_) {}
+    log('error', 'gemini', `Gemini ${res.status} response`, {
+      status: res.status,
+      body: errBody.slice(0, 500),
+    });
+    const err: any = new Error(`Gemini returned ${res.status}: ${errBody.slice(0, 200)}`);
     err.status = res.status;
     throw err;
   }
 
   const result = await res.json();
   const text = result?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-  if (!text) throw new Error("Empty Gemini response");
+  if (!text) {
+    log('warn', 'gemini', 'Empty Gemini response', {
+      candidates: JSON.stringify(result?.candidates?.slice(0, 1)).slice(0, 300),
+    });
+    throw new Error("Empty Gemini response");
+  }
 
   return { text, provider: "gemini" };
 }
@@ -206,14 +217,25 @@ async function geminiAnalyzeImage(
   });
 
   if (!res.ok) {
-    const err: any = new Error(`Gemini Vision returned ${res.status}`);
+    let errBody = '';
+    try { errBody = await res.text(); } catch (_) {}
+    log('error', 'gemini-vision', `Gemini Vision ${res.status} response`, {
+      status: res.status,
+      body: errBody.slice(0, 500),
+    });
+    const err: any = new Error(`Gemini Vision returned ${res.status}: ${errBody.slice(0, 200)}`);
     err.status = res.status;
     throw err;
   }
 
   const result = await res.json();
   const text = result?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-  if (!text) throw new Error("Empty Gemini Vision response");
+  if (!text) {
+    log('warn', 'gemini-vision', 'Empty Gemini Vision response', {
+      candidates: JSON.stringify(result?.candidates?.slice(0, 1)).slice(0, 300),
+    });
+    throw new Error("Empty Gemini Vision response");
+  }
 
   return { text, provider: "gemini" };
 }

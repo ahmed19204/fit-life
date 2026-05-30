@@ -6,7 +6,7 @@
  *
  * Architecture:
  *   Frontend → Supabase Edge Function (fitlife-ai) → Provider Router
- *   Primary:  Google Gemini (gemini-1.5-flash)
+ *   Primary:  Google Gemini (gemini-2.5-flash)
  *   Fallback: OpenRouter (deepseek for text, llama-vision for images)
  *
  * Fallback chain per operation:

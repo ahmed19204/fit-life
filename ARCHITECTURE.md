@@ -39,7 +39,7 @@ FitLife is a modern single-page application (SPA) built with vanilla JavaScript 
                                        │
                       ┌────────────────┴────────┐
                       │   Google Gemini AI API   │
-                      │   (gemini-2.0-flash)     │
+                      │   (gemini-2.5-flash)     │
                       └─────────────────────────┘
 ```
 
