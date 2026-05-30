@@ -1,13 +1,14 @@
 /**
  * FitLife AI Coach Assistant
- * Real AI-powered nutrition assistant via server-side proxy.
- * SECURITY: No API keys in frontend — calls /api/ai-chat.
+ * Real AI-powered nutrition assistant via unified Edge Function.
+ * SECURITY: No API keys in frontend — all calls route through
+ * ai.js → Supabase Edge Function (fitlife-ai) → Gemini/OpenRouter.
  * Uses AI Request Manager for throttling, dedup, and retry.
  * Supports conversation history, quick prompts, and contextual advice.
  */
 import { renderNavBar } from '../../components/nav-bar.js';
 import { renderPageHeader } from '../../components/page-header.js';
-import { getNutritionProfile } from '../../services/ai.js';
+import { getNutritionProfile, callAICoach } from '../../services/ai.js';
 import { getCurrentUser, getDisplayName } from '../../services/auth.js';
 import { makeDebouncedAIRequest } from '../../services/ai-request-manager.js';
 
@@ -91,20 +92,8 @@ async function callAI(message) {
       'chat',
       message, // Use message as payload for dedup (same question = cached answer)
       async () => {
-        const res = await fetch('/api/ai-chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contents }),
-        });
-
-        if (!res.ok) {
-          const err = new Error(`Server returned ${res.status}`);
-          err.status = res.status;
-          throw err;
-        }
-        const data = await res.json();
-        if (!data.success) throw new Error(data.message || 'AI error');
-        return data.text || "I couldn't generate a response. Please try again.";
+        // Route through ai.js callAICoach → Edge Function → Vercel fallback
+        return await callAICoach(contents);
       },
       { cacheTTL: 2 * 60 * 1000 } // 2 minute cache for chat responses
     );

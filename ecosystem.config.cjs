@@ -1,8 +1,8 @@
 module.exports = {
   apps: [{
     name: 'fitlife',
-    script: 'npx',
-    args: 'vite preview --host 0.0.0.0 --port 3000',
+    script: 'node',
+    args: '--env-file=.env server.js',
     cwd: '/home/user/webapp',
     env: { NODE_ENV: 'production' },
     watch: false,
