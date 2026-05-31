@@ -1,21 +1,24 @@
 /**
  * FitLife AI Service
  * ===========================================
- * Unified AI service routing ALL 5 AI operations through the
- * Supabase Edge Function (fitlife-ai) with professional fallback.
+ * Unified AI service routing ALL 5 AI operations through
+ * individual Supabase Edge Functions → Gemini API.
  *
  * Architecture:
- *   Frontend → Supabase Edge Function (fitlife-ai) → Provider Router
- *   Primary:  Google Gemini (gemini-2.5-flash)
- *   Fallback: OpenRouter (deepseek for text, llama-vision for images)
+ *   Frontend (supabase.functions.invoke) → Edge Function → Gemini 2.5 Flash
  *
- * Fallback chain per operation:
- *   1. Edge Function (Gemini → OpenRouter internally)
- *   2. Vercel proxy (/api/ai-*) as secondary fallback
- *   3. Local BMR calculation (nutrition only, final safety net)
+ * Edge Functions (Deno, server-side):
+ *   ai-coach         — AI fitness/nutrition chat
+ *   ai-analyze-image — Food image analysis (Gemini Vision)
+ *   ai-analyze-text  — Text-based meal analysis
+ *   ai-recipe        — AI recipe generation from ingredients
+ *   ai-nutrition     — Personalized nutrition plan generation
+ *
+ * Fallback:
+ *   nutrition only → local BMR calculation (final safety net)
  *
  * SECURITY: No API keys in frontend — all AI calls go through
- * authenticated Edge Function or server-side Vercel proxies.
+ * Supabase Edge Functions with GEMINI_API_KEY in Supabase Secrets.
  *
  * All AI calls go through the centralized AI Request Manager
  * to prevent 429 rate-limit errors via queue, throttle, dedup, cache, and retry.
@@ -24,60 +27,52 @@ import { supabase, isConfigured } from './supabase.js';
 import { ok, fail } from '../utils/response.js';
 import { makeAIRequest, makeOneShotAIRequest, clearOneShotLock, clearAICache, makeDebouncedAIRequest } from './ai-request-manager.js';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-
-// ─── Unified Edge Function Caller ──────────────────────────────────────────
+// ─── Edge Function Caller ──────────────────────────────────────────────────
 
 /**
- * Call the unified multi-provider AI endpoint.
- * Routes through /api/ai-unified (Vercel) which handles Gemini → OpenRouter fallback.
- * Falls back to Supabase Edge Function if Vercel endpoint is unavailable.
- * @param {string} action - One of: coach, analyze-image, analyze-text, recipe, nutrition
- * @param {object} payload - Action-specific payload (merged with { action })
+ * Invoke a Supabase Edge Function by name.
+ * Uses supabase-js client which auto-attaches auth headers.
+ * @param {string} fnName — Edge Function name (e.g. 'ai-coach')
+ * @param {object} payload — JSON body to send
  * @returns {object} Parsed response data
  */
-async function callUnifiedAI(action, payload) {
-  // Primary: Vercel unified endpoint (Gemini → OpenRouter fallback built in)
-  let res;
-  try {
-    res = await fetch('/api/ai-unified', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, ...payload }),
-    });
-  } catch (fetchErr) {
-    // Network error on primary — try Supabase Edge Function
-    console.warn('[AI] Unified endpoint unreachable, trying Edge Function:', fetchErr.message);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) throw new Error('Not authenticated');
-    res = await fetch(`${SUPABASE_URL}/functions/v1/fitlife-ai`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${session.access_token}`,
-      },
-      body: JSON.stringify({ action, ...payload }),
-    });
-  }
+async function invokeEdgeFunction(fnName, payload) {
+  console.log(`[AI] Invoking Edge Function: ${fnName}`);
 
-  if (!res.ok) {
-    const err = new Error(`Edge function returned ${res.status}`);
-    err.status = res.status;
-    // Try to get error details from response
-    try {
-      const errBody = await res.json();
-      err.message = errBody.message || err.message;
-      err.code = errBody.code;
-    } catch (_) { /* ignore parse errors */ }
+  const { data, error } = await supabase.functions.invoke(fnName, {
+    body: payload,
+  });
+
+  if (error) {
+    // supabase-js wraps non-2xx responses in error.context
+    console.error(`[AI] Edge Function '${fnName}' error:`, error.message, error);
+    const status = error.context?.status || 500;
+    const err = new Error(error.message || `Edge function ${fnName} failed`);
+    err.status = status;
+
+    // Try to extract structured error from the response body
+    if (error.context?.body) {
+      try {
+        // error.context might have json() method or be a ReadableStream
+        const bodyText = typeof error.context.body === 'string'
+          ? error.context.body
+          : await new Response(error.context.body).text().catch(() => '');
+        if (bodyText) {
+          const parsed = JSON.parse(bodyText);
+          err.message = parsed.message || err.message;
+          err.code = parsed.code;
+        }
+      } catch (_) { /* ignore parse errors */ }
+    }
     throw err;
   }
 
-  const result = await res.json();
-  if (!result.success) {
-    throw new Error(result.message || 'AI service error');
+  // data is the parsed JSON body from the Edge Function
+  if (!data || !data.success) {
+    throw new Error(data?.message || `AI service returned unexpected response`);
   }
 
-  return result;
+  return data;
 }
 
 // ─── Input Sanitization & Validation ───────────────────────────────────────
@@ -169,77 +164,6 @@ function generateFallbackPlan(input) {
   };
 }
 
-// ─── Prompt Builder (for Vercel fallback) ──────────────────────────────────
-
-function buildPrompt(input) {
-  const diet = input.restrictions.length > 0 ? `Dietary restrictions: ${input.restrictions.join(', ')}.` : 'No dietary restrictions.';
-  const health = input.health_conditions.length > 0 && !input.health_conditions.includes('none')
-    ? `Health considerations: ${input.health_conditions.join(', ')}.` : 'No specific health conditions.';
-  return `You are a professional nutritionist creating a personalized meal plan.
-
-User Profile:
-- Age: ${input.age}, Weight: ${input.weight}kg, Height: ${input.height}cm
-- Goal: ${input.goal.replace('-', ' ')}, Activity: ${input.activity_level.replace(/-/g, ' ')}
-- Diet: ${input.diet_type}, ${diet} ${health}
-- Meals/day: ${input.meals_per_day}
-
-Return ONLY a JSON object:
-{"calories":number,"protein":number,"carbs":number,"fat":number,"meal_plan":[{"name":"string","calories":number,"protein":number,"carbs":number,"fat":number,"foods":["string"]}]}
-
-Requirements: Mifflin-St Jeor + activity multiplier + goal adjustment. ${input.meals_per_day} meals. 2-4 foods per meal. ONLY JSON, no markdown.`;
-}
-
-// ─── Vercel Proxy Fallbacks ────────────────────────────────────────────────
-
-async function callServerProxy(input) {
-  const prompt = buildPrompt(input);
-  const res = await fetch('/api/ai-nutrition', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt }),
-  });
-  if (!res.ok) {
-    const err = new Error(`Server proxy returned ${res.status}`);
-    err.status = res.status;
-    throw err;
-  }
-  const result = await res.json();
-  if (!result.success) throw new Error(result.message || 'Proxy error');
-  return result.data;
-}
-
-async function callVercelChat(contents) {
-  const res = await fetch('/api/ai-chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contents }),
-  });
-  if (!res.ok) {
-    const err = new Error(`Chat proxy returned ${res.status}`);
-    err.status = res.status;
-    throw err;
-  }
-  const data = await res.json();
-  if (!data.success) throw new Error(data.message || 'Chat error');
-  return data.text || "I couldn't generate a response.";
-}
-
-async function callVercelFoodAnalyze(payload) {
-  const res = await fetch('/api/ai-food-analyze', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    const err = new Error(`Food analyze proxy returned ${res.status}`);
-    err.status = res.status;
-    throw err;
-  }
-  const data = await res.json();
-  if (!data.success) throw new Error(data.message || 'Analysis failed');
-  return data.data;
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // PUBLIC API — 5 AI Systems
 // ═══════════════════════════════════════════════════════════════════════════
@@ -247,24 +171,17 @@ async function callVercelFoodAnalyze(payload) {
 // ── 1. AI Coach Chat ───────────────────────────────────────────────────────
 
 /**
- * AI Coach chat. Routes through Edge Function (primary) → Vercel proxy (fallback).
+ * AI Coach chat. Routes through Supabase Edge Function 'ai-coach'.
  * @param {Array} contents - Gemini-format conversation history [{role, parts}]
  * @returns {string} AI response text
  */
 export async function callAICoach(contents) {
   try {
-    // Primary: Unified Edge Function
-    const result = await callUnifiedAI('coach', { contents });
+    const result = await invokeEdgeFunction('ai-coach', { contents });
     return result.text || "I couldn't generate a response. Please try again.";
-  } catch (edgeErr) {
-    console.warn('[AI] Coach edge function failed, trying Vercel fallback:', edgeErr.message);
-    // Secondary: Vercel proxy /api/ai-chat
-    try {
-      return await callVercelChat(contents);
-    } catch (vercelErr) {
-      console.warn('[AI] Coach Vercel fallback also failed:', vercelErr.message);
-      throw vercelErr;
-    }
+  } catch (err) {
+    console.error('[AI Coach] Edge function error:', err.message, 'status:', err.status);
+    throw err; // Let caller handle — no silent swallowing
   }
 }
 
@@ -272,8 +189,7 @@ export async function callAICoach(contents) {
 
 /**
  * Analyze food from an image (base64).
- * Primary: Edge Function (Gemini Vision → OpenRouter Vision)
- * Fallback: Vercel /api/ai-food-analyze
+ * Routes through Supabase Edge Function 'ai-analyze-image'.
  */
 export async function analyzeImageMeal(base64Image) {
   if (!base64Image) return fail('MISSING_DATA', 'No image provided');
@@ -281,24 +197,17 @@ export async function analyzeImageMeal(base64Image) {
   try {
     const result = await makeAIRequest(
       'food-image-analysis',
-      base64Image.slice(0, 100), // Prefix for cache key
+      base64Image.slice(0, 100),
       async () => {
-        // Primary: Edge Function
-        try {
-          const edgeResult = await callUnifiedAI('analyze-image', { image: base64Image });
-          return edgeResult.data;
-        } catch (edgeErr) {
-          console.warn('[AI] Image analysis edge function failed, trying Vercel:', edgeErr.message);
-          // Fallback: Vercel proxy
-          return await callVercelFoodAnalyze({ image: base64Image, mode: 'image' });
-        }
+        const edgeResult = await invokeEdgeFunction('ai-analyze-image', { image: base64Image });
+        return edgeResult.data;
       },
-      { cacheTTL: 5 * 60 * 1000, skipCache: true } // Don't cache images (each is unique)
+      { cacheTTL: 5 * 60 * 1000, skipCache: true }
     );
     return ok('Image analysis complete.', result);
   } catch (e) {
-    console.error('[AI] Image analysis failed:', e.message);
-    return fail('AI_ERROR', e.message?.includes('429') ? 'AI service busy. Try again shortly.' : 'Image analysis failed. Please try again.');
+    console.error('[AI] Image analysis failed:', e.message, 'status:', e.status);
+    return fail('AI_ERROR', e.message || 'Image analysis failed. Please try again.');
   }
 }
 
@@ -306,8 +215,7 @@ export async function analyzeImageMeal(base64Image) {
 
 /**
  * Analyze food from a text description.
- * Primary: Edge Function (Gemini → OpenRouter)
- * Fallback: Vercel /api/ai-food-analyze
+ * Routes through Supabase Edge Function 'ai-analyze-text'.
  */
 export async function analyzeTextMeal(description) {
   if (!description || typeof description !== 'string' || description.trim().length < 3) {
@@ -319,22 +227,15 @@ export async function analyzeTextMeal(description) {
       'food-text-analysis',
       description.trim(),
       async () => {
-        // Primary: Edge Function
-        try {
-          const edgeResult = await callUnifiedAI('analyze-text', { description: description.trim() });
-          return edgeResult.data;
-        } catch (edgeErr) {
-          console.warn('[AI] Text analysis edge function failed, trying Vercel:', edgeErr.message);
-          // Fallback: Vercel proxy
-          return await callVercelFoodAnalyze({ description: description.trim(), mode: 'text' });
-        }
+        const edgeResult = await invokeEdgeFunction('ai-analyze-text', { description: description.trim() });
+        return edgeResult.data;
       },
-      { cacheTTL: 5 * 60 * 1000 } // 5 minute cache for same descriptions
+      { cacheTTL: 5 * 60 * 1000 }
     );
     return ok('Text analysis complete.', result);
   } catch (e) {
-    console.error('[AI] Text analysis failed:', e.message);
-    return fail('AI_ERROR', e.message?.includes('429') ? 'AI service busy. Try again shortly.' : 'Meal analysis failed. Please try again.');
+    console.error('[AI] Text analysis failed:', e.message, 'status:', e.status);
+    return fail('AI_ERROR', e.message || 'Meal analysis failed. Please try again.');
   }
 }
 
@@ -342,8 +243,7 @@ export async function analyzeTextMeal(description) {
 
 /**
  * Generate a recipe from ingredients using AI.
- * Primary: Edge Function (Gemini → OpenRouter)
- * Fallback: Vercel /api/ai-nutrition (custom prompt)
+ * Routes through Supabase Edge Function 'ai-recipe'.
  */
 export async function generateRecipeFromIngredients(ingredients, profile = {}) {
   if (!ingredients || ingredients.trim().length < 3) {
@@ -355,45 +255,18 @@ export async function generateRecipeFromIngredients(ingredients, profile = {}) {
       'recipe-generate',
       ingredients.trim(),
       async () => {
-        // Primary: Edge Function
-        try {
-          const edgeResult = await callUnifiedAI('recipe', { 
-            ingredients: ingredients.trim(), 
-            profile 
-          });
-          return edgeResult.data;
-        } catch (edgeErr) {
-          console.warn('[AI] Recipe edge function failed, trying Vercel:', edgeErr.message);
-          // Fallback: Vercel /api/ai-nutrition with recipe prompt
-          const diet = profile.diet_type || 'balanced';
-          const goal = profile.goal || 'improve-health';
-          const restrictions = (profile.restrictions || []).join(', ') || 'none';
-          
-          const prompt = `You are a professional chef and nutritionist. Create a recipe using these ingredients: ${ingredients.trim()}.
-User profile: Diet: ${diet}, Goal: ${goal}, Restrictions: ${restrictions}.
-
-Return ONLY valid JSON:
-{"name":"Recipe name","prepTime":"X min","cookTime":"X min","servings":number,"calories":number,"protein":number,"carbs":number,"fat":number,"ingredients":["amount ingredient"],"instructions":["step 1","step 2"],"tips":"Optional cooking tip"}
-
-Keep it practical and healthy. ONLY JSON, no markdown.`;
-
-          const res = await fetch('/api/ai-nutrition', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt }),
-          });
-          if (!res.ok) throw new Error(`Server returned ${res.status}`);
-          const data = await res.json();
-          if (!data.success) throw new Error(data.message || 'Generation failed');
-          return data.data;
-        }
+        const edgeResult = await invokeEdgeFunction('ai-recipe', {
+          ingredients: ingredients.trim(),
+          profile,
+        });
+        return edgeResult.data;
       },
       { cacheTTL: 10 * 60 * 1000 }
     );
     return ok('Recipe generated.', result);
   } catch (e) {
-    console.error('[AI] Recipe generation failed:', e.message);
-    return fail('AI_ERROR', 'Recipe generation failed. Please try again.');
+    console.error('[AI] Recipe generation failed:', e.message, 'status:', e.status);
+    return fail('AI_ERROR', e.message || 'Recipe generation failed. Please try again.');
   }
 }
 
@@ -401,7 +274,7 @@ Keep it practical and healthy. ONLY JSON, no markdown.`;
 
 /**
  * Generate a nutrition plan.
- * Triple fallback: Edge Function → Vercel Proxy → Local BMR
+ * Edge Function primary → Local BMR fallback.
  */
 export async function generateNutritionPlan(onboardingData) {
   const sanitized = sanitizeUserData(onboardingData);
@@ -415,21 +288,15 @@ export async function generateNutritionPlan(onboardingData) {
       'nutrition-plan',
       sanitized,
       async () => {
-        // Triple fallback: Edge Function → Server Proxy → Local BMR
         try {
-          const edgeResult = await callUnifiedAI('nutrition', { input: sanitized });
+          const edgeResult = await invokeEdgeFunction('ai-nutrition', { input: sanitized });
           return edgeResult.data;
         } catch (edgeErr) {
-          console.warn('[AI] Nutrition edge function failed, trying server proxy:', edgeErr.message);
-          try {
-            return await callServerProxy(sanitized);
-          } catch (proxyErr) {
-            console.warn('[AI] Server proxy failed, using local fallback:', proxyErr.message);
-            return generateFallbackPlan(sanitized);
-          }
+          console.warn('[AI] Nutrition edge function failed, using local fallback:', edgeErr.message);
+          return generateFallbackPlan(sanitized);
         }
       },
-      { cacheTTL: 30 * 60 * 1000 } // 30-minute cache
+      { cacheTTL: 30 * 60 * 1000 }
     );
 
     return ok('Nutrition plan generated.', plan);
@@ -442,7 +309,6 @@ export async function generateNutritionPlan(onboardingData) {
 
 /**
  * Generate a nutrition plan that runs ONCE per onboarding session.
- * Uses makeOneShotAIRequest to prevent duplicate AI calls.
  */
 export async function generateOnboardingPlan(onboardingData) {
   const sanitized = sanitizeUserData(onboardingData);
@@ -456,14 +322,10 @@ export async function generateOnboardingPlan(onboardingData) {
       'onboarding-plan',
       async () => {
         try {
-          const edgeResult = await callUnifiedAI('nutrition', { input: sanitized });
+          const edgeResult = await invokeEdgeFunction('ai-nutrition', { input: sanitized });
           return edgeResult.data;
         } catch {
-          try {
-            return await callServerProxy(sanitized);
-          } catch {
-            return generateFallbackPlan(sanitized);
-          }
+          return generateFallbackPlan(sanitized);
         }
       }
     );
@@ -511,9 +373,9 @@ export async function saveNutritionProfile(nutritionData) {
   return ok('Profile saved.', data);
 }
 
-// In-memory profile cache to avoid repeated DB calls on each navigation
+// In-memory profile cache
 let profileCache = { data: null, timestamp: 0, userId: null };
-const PROFILE_CACHE_TTL = 60000; // 1 minute
+const PROFILE_CACHE_TTL = 60000;
 
 export async function getNutritionProfile() {
   if (!isConfigured) return fail('SUPABASE_NOT_CONFIGURED', 'Supabase not available');
@@ -540,9 +402,9 @@ export async function getNutritionProfile() {
   return result;
 }
 
-// Onboarding check cache (avoid repeated checks during navigation)
+// Onboarding check cache
 let onboardingCache = { result: null, timestamp: 0, userId: null };
-const ONBOARDING_CACHE_TTL = 30000; // 30 seconds
+const ONBOARDING_CACHE_TTL = 30000;
 
 export async function checkOnboardingCompleted() {
   if (!isConfigured) return ok('Not completed.', { completed: false });
@@ -567,9 +429,6 @@ export async function checkOnboardingCompleted() {
   return onboardingResult;
 }
 
-/**
- * Invalidate all profile and onboarding caches (e.g. after saving profile)
- */
 export function invalidateProfileCache() {
   profileCache = { data: null, timestamp: 0, userId: null };
   onboardingCache = { result: null, timestamp: 0, userId: null };
@@ -577,9 +436,6 @@ export function invalidateProfileCache() {
 
 // ─── Profile Update with Recalculation ─────────────────────────────────────
 
-/**
- * Update specific profile fields and recalculate nutrition targets if needed.
- */
 export async function updateProfileField(updates) {
   if (!isConfigured) return fail('SUPABASE_NOT_CONFIGURED', 'Supabase not available');
   const { data: { user }, error: userErr } = await supabase.auth.getUser();

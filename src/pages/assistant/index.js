@@ -92,21 +92,23 @@ async function callAI(message) {
       'chat',
       message, // Use message as payload for dedup (same question = cached answer)
       async () => {
-        // Route through ai.js callAICoach → Edge Function → Vercel fallback
+        // Route through ai.js callAICoach → Supabase Edge Function → Gemini
         return await callAICoach(contents);
       },
       { cacheTTL: 2 * 60 * 1000 } // 2 minute cache for chat responses
     );
     return result;
   } catch (e) {
-    console.error('[AI Coach] Error:', e);
-    if (e.message?.includes('busy') || e.message?.includes('queue')) {
-      return "I'm processing your request. Please wait a moment and try again.";
+    console.error('[AI Coach] Error:', e.message, e);
+    // Surface the actual error — no generic fallback messages
+    const msg = e.message || 'Unknown error';
+    if (msg.includes('429') || msg.includes('rate') || msg.includes('busy')) {
+      return `⚠️ Rate limited — please wait a few seconds and try again.`;
     }
-    if (e.message?.includes('429') || e.message?.includes('rate')) {
-      return "I'm taking a short breather to stay responsive. Please try again in a few seconds.";
+    if (msg.includes('CONFIG_ERROR') || msg.includes('not configured')) {
+      return `⚠️ AI service is not configured. Please contact support.`;
     }
-    return "Sorry, I'm having trouble connecting right now. Please try again in a moment.";
+    return `⚠️ AI error: ${msg}`;
   }
 }
 
