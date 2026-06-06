@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment variables (NEVER commit)
+.env
+.env.local
+.env.*.local
+.dev.vars
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Cloudflare/Vercel
+.wrangler/
+.vercel/
+
+# PM2
+.pm2/
+pids/
+
+# Backups
+*.backup
+*.bak
+*.tar.gz

@@ -1,0 +1,35 @@
+{
+  "name": "FitLife - AI Fitness Platform",
+  "short_name": "FitLife",
+  "description": "AI-Powered Fitness & Nutrition Platform. Personalized meal plans, intelligent tracking, and real-time insights.",
+  "start_url": "/#/dashboard",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0e150e",
+  "theme_color": "#0e150e",
+  "orientation": "portrait-primary",
+  "categories": ["fitness", "health", "food"],
+  "icons": [
+    {
+      "src": "/assets/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/assets/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/assets/icons/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "screenshots": [],
+  "related_applications": [],
+  "prefer_related_applications": false
+}
