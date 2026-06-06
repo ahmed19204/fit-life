@@ -5,6 +5,8 @@
  */
 import { generateOnboardingPlan, saveNutritionProfile, resetOnboardingLock, invalidateProfileCache } from '../../services/ai.js';
 import { navigate } from '../../services/router.js';
+import { toast } from '../../services/toast.js';
+import { withLoading } from '../../services/loading.js';
 
 let currentStep = 1;
 const totalSteps = 5;
@@ -318,7 +320,7 @@ function initOnboarding() {
       btn.innerHTML = '<span class="material-symbols-outlined animate-spin text-lg">progress_activity</span><span>Generating AI Plan...</span>';
       
       // Use one-shot AI request (runs AT MOST ONCE per session)
-      const result = await generateOnboardingPlan(onboardingData);
+      const result = await withLoading('onboarding-plan', () => generateOnboardingPlan(onboardingData));
       if (result.success) {
         // Save the plan data for the plan page
         const planData = { ...onboardingData, ...result.data };
@@ -333,7 +335,7 @@ function initOnboarding() {
         isGenerating = false;
         btn.disabled = false;
         btn.innerHTML = 'Generate My AI Plan <span class="material-symbols-outlined text-lg">auto_awesome</span>';
-        alert('Failed to generate plan: ' + result.message);
+        toast.error('Failed to generate plan: ' + result.message);
       }
     }
   };

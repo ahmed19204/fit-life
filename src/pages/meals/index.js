@@ -12,6 +12,8 @@ import { renderNavBar } from '../../components/nav-bar.js';
 import { renderPageHeader } from '../../components/page-header.js';
 import { saveMeal, saveAnalysisHistory } from '../../services/meals.js';
 import { analyzeImageMeal, analyzeTextMeal } from '../../services/ai.js';
+import { toast } from '../../services/toast.js';
+import { withLoading } from '../../services/loading.js';
 
 let isAnalyzing = false;
 
@@ -177,17 +179,21 @@ export function renderMeals() {
     </div>`;
 }
 
-function showToast(text, duration = 2500) {
-  const toast = document.getElementById('mealToast');
-  const toastText = document.getElementById('toastText');
-  if (!toast) return;
-  toastText.textContent = text;
-  toast.style.opacity = '1';
-  toast.style.transform = 'translateX(-50%) translateY(0)';
-  setTimeout(() => {
-    toast.style.opacity = '0';
-    toast.style.transform = 'translateX(-50%) translateY(10px)';
-  }, duration);
+function showToast(text, duration = 2500, type = 'success') {
+  // Use the unified, app-wide toast system (Phase 3)
+  try {
+    if (type === 'error') return toast.error(text, { duration });
+    return toast.success(text, { duration });
+  } catch {
+    // Fallback to legacy DOM toast if container missing
+    const el = document.getElementById('mealToast');
+    const txt = document.getElementById('toastText');
+    if (!el || !txt) return;
+    txt.textContent = text;
+    el.style.opacity = '1';
+    el.style.transform = 'translateX(-50%) translateY(0)';
+    setTimeout(() => { el.style.opacity = '0'; el.style.transform = 'translateX(-50%) translateY(10px)'; }, duration);
+  }
 }
 
 function renderAnalysisResult(data, imageDataUrl) {
@@ -377,7 +383,7 @@ function initMealsPage() {
 
     showAnalyzing('image');
 
-    const result = await analyzeImageMeal(currentImageData);
+    const result = await withLoading('meal-analyze-image', () => analyzeImageMeal(currentImageData));
     isAnalyzing = false;
 
     if (btn) { btn.disabled = false; btn.innerHTML = '<span class="material-symbols-outlined text-lg" style="font-variation-settings: \'FILL\' 1;">neurology</span> Analyze with AI'; }
@@ -404,7 +410,7 @@ function initMealsPage() {
 
     showAnalyzing('text');
 
-    const result = await analyzeTextMeal(desc);
+    const result = await withLoading('meal-analyze-text', () => analyzeTextMeal(desc));
     isAnalyzing = false;
 
     if (btn) { btn.disabled = false; btn.innerHTML = '<span class="material-symbols-outlined text-lg" style="font-variation-settings: \'FILL\' 1;">neurology</span> Analyze Meal'; }

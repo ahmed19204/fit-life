@@ -8,6 +8,8 @@ import { getNutritionProfile, updateProfileField, invalidateProfileCache } from 
 import { renderNavBar } from '../../components/nav-bar.js';
 import { renderPageHeader } from '../../components/page-header.js';
 import { emit, EVENTS } from '../../services/events.js';
+import { toast } from '../../services/toast.js';
+import { withLoading } from '../../services/loading.js';
 
 let isEditing = false;
 let isSaving = false;
@@ -79,7 +81,8 @@ function setupProfileHandlers(user, profile) {
     if (activitySelect?.value) updates.activity_level = activitySelect.value;
     if (genderSelect?.value) updates.gender = genderSelect.value;
 
-    const result = await updateProfileField(updates);
+    const result = await withLoading('profile-update', () => updateProfileField(updates));
+    if (result.success) toast.success('Profile updated');
     isSaving = false;
 
     if (result.success) {
@@ -107,7 +110,7 @@ function setupProfileHandlers(user, profile) {
       }, 1200);
     } else {
       if (btn) { btn.disabled = false; btn.innerHTML = '<span class="material-symbols-outlined text-lg">save</span> Save Changes'; }
-      alert(result.message || 'Failed to save profile.');
+      toast.error(result.message || 'Failed to save profile.');
     }
   };
 
@@ -129,7 +132,9 @@ function setupProfileHandlers(user, profile) {
     const btn = document.getElementById('quickWeightBtn');
     if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
 
-    const result = await updateProfileField({ weight });
+    const result = await withLoading('profile-weight', () => updateProfileField({ weight }));
+    if (result.success) toast.success('Weight updated');
+    else toast.error(result.message || 'Update failed');
     if (result.success) {
       const toast = document.getElementById('profileToast');
       if (toast) {

@@ -5,6 +5,7 @@
 import { renderNavBar } from '../../components/nav-bar.js';
 import { renderPageHeader } from '../../components/page-header.js';
 import { getRecentMeals, deleteMeal } from '../../services/meals.js';
+import { toast } from '../../services/toast.js';
 
 // Food type → Material icon mapping for visual meal representation
 const MEAL_TYPE_ICONS = {
@@ -79,6 +80,7 @@ function setupHistoryHandlers() {
     
     const result = await deleteMeal(id);
     if (result.success) {
+      toast.success('Meal deleted');
       const el = document.getElementById(`meal-${id}`);
       if (el) {
         el.style.opacity = '0';
@@ -86,6 +88,7 @@ function setupHistoryHandlers() {
         setTimeout(() => el.remove(), 200);
       }
     } else {
+      toast.error(result.message || 'Delete failed');
       if (btn) btn.innerHTML = '<span class="material-symbols-outlined text-xs">delete</span>';
     }
   };

@@ -6,6 +6,8 @@
 import { renderNavBar } from '../../components/nav-bar.js';
 import { renderPageHeader } from '../../components/page-header.js';
 import { getNutritionProfile, generateRecipeFromIngredients } from '../../services/ai.js';
+import { toast } from '../../services/toast.js';
+import { withLoading } from '../../services/loading.js';
 
 const RECIPE_CATEGORIES = [
   { id: 'breakfast', icon: 'egg_alt', label: 'Breakfast', color: 'primary' },
@@ -76,7 +78,8 @@ function setupRecipeHandlers(profile) {
         <p class="text-xs text-on-surface-variant">AI is creating your personalized recipe...</p>
       </div>`;
 
-    const res = await generateRecipeFromIngredients(ingredients, profile);
+    const res = await withLoading('recipe-gen', () => generateRecipeFromIngredients(ingredients, profile));
+    if (!res.success) toast.error(res.message || 'Recipe generation failed');
     isGenerating = false;
     if (btn) { btn.disabled = false; btn.innerHTML = 'Generate'; }
 

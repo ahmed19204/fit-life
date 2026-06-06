@@ -7,6 +7,9 @@ import { supabase, isConfigured } from './supabase.js';
 import { ok, fail } from '../utils/response.js';
 import { clearAICache } from './ai-request-manager.js';
 import { invalidateProfileCache } from './ai.js';
+import { logger } from '../utils/logger.js';
+
+const log = logger.scoped('Auth');
 
 function mapAuthError(error, action) {
   const raw = error?.message || 'Unexpected authentication error.';
@@ -110,20 +113,58 @@ export async function loginUser({ email, password }) {
 
 export async function signInWithGoogle() {
   if (!isConfigured) return fail('SUPABASE_NOT_CONFIGURED', 'Supabase not ready.');
-  
+
   try {
     // Use origin without hash — Supabase OAuth drops the hash fragment.
-    // After redirect, the app.js init() detects the logged-in user and routes to /dashboard.
+    // After redirect, app.js init() routes the signed-in user to /dashboard or /welcome.
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
         redirectTo: window.location.origin,
+        queryParams: { access_type: 'offline', prompt: 'consent' },
       },
     });
     if (error) return mapAuthError(error, 'oauth');
     return ok('Redirecting to Google...', data);
   } catch (e) {
     return mapAuthError(e, 'oauth');
+  }
+}
+
+/**
+ * Verify the 6-digit OTP code emailed by Supabase after signUp.
+ * Supabase sends it as the `token` for type `signup` (or `email`).
+ */
+export async function verifyEmailOtp({ email, token, type = 'signup' }) {
+  if (!isConfigured) return fail('SUPABASE_NOT_CONFIGURED', 'Supabase not ready.');
+  if (!email || !token) return fail('MISSING_DATA', 'Email and code are required.');
+
+  try {
+    const cleanToken = String(token).replace(/\D/g, '').slice(0, 8);
+    const { data, error } = await supabase.auth.verifyOtp({ email, token: cleanToken, type });
+    if (error) {
+      log.warn('verifyOtp failed', { message: error.message });
+      return fail('OTP_INVALID', error.message || 'Invalid or expired code.', error);
+    }
+    if (data?.user) await syncUserProfile(data.user);
+    return ok('Email verified.', { user: data.user, session: data.session });
+  } catch (e) {
+    return fail('OTP_ERROR', e.message || 'OTP verification failed.', e);
+  }
+}
+
+/**
+ * Resend the email confirmation OTP. Supabase rate-limits this server-side.
+ */
+export async function resendVerificationOtp({ email, type = 'signup' }) {
+  if (!isConfigured) return fail('SUPABASE_NOT_CONFIGURED', 'Supabase not ready.');
+  if (!email) return fail('MISSING_DATA', 'Email is required.');
+  try {
+    const { error } = await supabase.auth.resend({ email, type });
+    if (error) return fail('RESEND_FAILED', error.message || 'Could not resend code.', error);
+    return ok('Verification code resent.');
+  } catch (e) {
+    return fail('RESEND_FAILED', e.message || 'Could not resend code.', e);
   }
 }
 

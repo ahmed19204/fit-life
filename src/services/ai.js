@@ -26,6 +26,14 @@
 import { supabase, isConfigured } from './supabase.js';
 import { ok, fail } from '../utils/response.js';
 import { makeAIRequest, makeOneShotAIRequest, clearOneShotLock, clearAICache, makeDebouncedAIRequest } from './ai-request-manager.js';
+import {
+  MealSchema, NutritionPlanSchema, RecipeSchema,
+  sanitizeMealPayload, sanitizeNutritionPayload, sanitizeRecipePayload,
+  validate,
+} from '../utils/schemas.js';
+import { logger, logSupabaseError } from '../utils/logger.js';
+
+const aiLog = logger.scoped('AI');
 
 // ─── Edge Function Caller ──────────────────────────────────────────────────
 
@@ -45,7 +53,11 @@ async function invokeEdgeFunction(fnName, payload) {
 
   if (error) {
     // supabase-js wraps non-2xx responses in error.context
-    console.error(`[AI] Edge Function '${fnName}' error:`, error.message, error);
+    aiLog.error(`Edge Function '${fnName}' error:`, error.message, {
+      status: error.context?.status,
+      hint: error.hint,
+      details: error.details,
+    });
     const status = error.context?.status || 500;
     const err = new Error(error.message || `Edge function ${fnName} failed`);
     err.status = status;
@@ -204,9 +216,16 @@ export async function analyzeImageMeal(base64Image) {
       },
       { cacheTTL: 5 * 60 * 1000, skipCache: true }
     );
-    return ok('Image analysis complete.', result);
+    // Phase 1: sanitize + validate AI output (image analysis returns meal-like data)
+    const sanitized = sanitizeMealPayload(result || {});
+    const v = validate(MealSchema, sanitized);
+    if (!v.success) {
+      aiLog.warn('Image analysis output failed validation, returning sanitized fallback', { errors: v.errors });
+      return ok('Image analysis complete (partial).', sanitized);
+    }
+    return ok('Image analysis complete.', { ...result, ...v.data });
   } catch (e) {
-    console.error('[AI] Image analysis failed:', e.message, 'status:', e.status);
+    aiLog.error('Image analysis failed:', e.message, 'status:', e.status);
     return fail('AI_ERROR', e.message || 'Image analysis failed. Please try again.');
   }
 }
@@ -232,9 +251,15 @@ export async function analyzeTextMeal(description) {
       },
       { cacheTTL: 5 * 60 * 1000 }
     );
-    return ok('Text analysis complete.', result);
+    const sanitized = sanitizeMealPayload(result || {});
+    const v = validate(MealSchema, sanitized);
+    if (!v.success) {
+      aiLog.warn('Text analysis output failed validation, returning sanitized fallback', { errors: v.errors });
+      return ok('Text analysis complete (partial).', sanitized);
+    }
+    return ok('Text analysis complete.', { ...result, ...v.data });
   } catch (e) {
-    console.error('[AI] Text analysis failed:', e.message, 'status:', e.status);
+    aiLog.error('Text analysis failed:', e.message, 'status:', e.status);
     return fail('AI_ERROR', e.message || 'Meal analysis failed. Please try again.');
   }
 }
@@ -263,9 +288,15 @@ export async function generateRecipeFromIngredients(ingredients, profile = {}) {
       },
       { cacheTTL: 10 * 60 * 1000 }
     );
-    return ok('Recipe generated.', result);
+    const sanitized = sanitizeRecipePayload(result || {});
+    const v = validate(RecipeSchema, sanitized);
+    if (!v.success) {
+      aiLog.warn('Recipe output failed validation', { errors: v.errors });
+      return ok('Recipe generated (sanitized).', sanitized);
+    }
+    return ok('Recipe generated.', v.data);
   } catch (e) {
-    console.error('[AI] Recipe generation failed:', e.message, 'status:', e.status);
+    aiLog.error('Recipe generation failed:', e.message, 'status:', e.status);
     return fail('AI_ERROR', e.message || 'Recipe generation failed. Please try again.');
   }
 }
@@ -299,9 +330,15 @@ export async function generateNutritionPlan(onboardingData) {
       { cacheTTL: 30 * 60 * 1000 }
     );
 
-    return ok('Nutrition plan generated.', plan);
+    const cleanedPlan = sanitizeNutritionPayload(plan || {});
+    const v = validate(NutritionPlanSchema, cleanedPlan);
+    if (!v.success) {
+      aiLog.warn('Nutrition plan output failed validation, falling back to local calc', { errors: v.errors });
+      return ok('Nutrition plan generated (local fallback).', generateFallbackPlan(sanitized));
+    }
+    return ok('Nutrition plan generated.', v.data);
   } catch (e) {
-    console.error('[AI] Request manager failed, using emergency fallback:', e.message);
+    aiLog.error('Request manager failed, using emergency fallback:', e.message);
     const fallbackPlan = generateFallbackPlan(sanitized);
     return ok('Nutrition plan generated (local calculation).', fallbackPlan);
   }
@@ -330,9 +367,15 @@ export async function generateOnboardingPlan(onboardingData) {
       }
     );
 
-    return ok('Nutrition plan generated.', plan);
+    const cleanedPlan = sanitizeNutritionPayload(plan || {});
+    const v = validate(NutritionPlanSchema, cleanedPlan);
+    if (!v.success) {
+      aiLog.warn('Onboarding plan validation failed, using local fallback', { errors: v.errors });
+      return ok('Nutrition plan generated (local fallback).', generateFallbackPlan(sanitized));
+    }
+    return ok('Nutrition plan generated.', v.data);
   } catch (e) {
-    console.error('[AI] Onboarding plan generation failed:', e.message);
+    aiLog.error('Onboarding plan generation failed:', e.message);
     const fallbackPlan = generateFallbackPlan(sanitized);
     return ok('Nutrition plan generated (local calculation).', fallbackPlan);
   }
@@ -366,7 +409,10 @@ export async function saveNutritionProfile(nutritionData) {
   };
 
   const { data, error } = await supabase.from('user_profiles').upsert(payload, { onConflict: 'user_id' }).select().single();
-  if (error) return fail('DATABASE_ERROR', 'Failed to save profile', error);
+  if (error) {
+    logSupabaseError('AI', 'saveNutritionProfile.upsert', error, { payload });
+    return fail('DATABASE_ERROR', 'Failed to save profile', error);
+  }
   
   clearAICache();
   

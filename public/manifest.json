@@ -1,34 +1,47 @@
 {
-  "name": "FitLife - AI Fitness Platform",
+  "name": "FitLife — AI Fitness & Nutrition",
   "short_name": "FitLife",
   "id": "fitlife-ai-app",
-  "description": "AI-Powered Fitness & Nutrition Platform. Personalized meal plans, intelligent tracking, and real-time insights.",
+  "description": "AI-powered fitness & nutrition coaching: instant meal analysis, smart recipes, personalized plans, real-time coaching.",
   "start_url": "/#/dashboard",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui", "browser"],
   "lang": "en",
+  "dir": "ltr",
   "background_color": "#0e150e",
   "theme_color": "#0e150e",
   "orientation": "portrait-primary",
-  "categories": ["fitness", "health", "food"],
+  "categories": ["fitness", "health", "lifestyle", "food", "productivity"],
   "icons": [
+    { "src": "/assets/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/assets/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/assets/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/assets/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/assets/icons/apple-touch-icon.png", "sizes": "180x180", "type": "image/png", "purpose": "any" },
+    { "src": "/assets/icons/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ],
+  "shortcuts": [
     {
-      "src": "/assets/icons/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any maskable"
+      "name": "Analyze Food",
+      "short_name": "Scan",
+      "description": "Snap a photo of your meal for AI nutrition analysis",
+      "url": "/#/meals",
+      "icons": [{ "src": "/assets/icons/icon-192.png", "sizes": "192x192" }]
     },
     {
-      "src": "/assets/icons/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
+      "name": "AI Coach",
+      "short_name": "Coach",
+      "description": "Chat with your personal AI nutrition coach",
+      "url": "/#/assistant",
+      "icons": [{ "src": "/assets/icons/icon-192.png", "sizes": "192x192" }]
     },
     {
-      "src": "/assets/icons/apple-touch-icon.png",
-      "sizes": "180x180",
-      "type": "image/png",
-      "purpose": "any"
+      "name": "Today's Progress",
+      "short_name": "Progress",
+      "description": "View your daily nutrition progress",
+      "url": "/#/progress",
+      "icons": [{ "src": "/assets/icons/icon-192.png", "sizes": "192x192" }]
     }
   ],
   "screenshots": [],

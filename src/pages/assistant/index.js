@@ -11,6 +11,8 @@ import { renderPageHeader } from '../../components/page-header.js';
 import { getNutritionProfile, callAICoach } from '../../services/ai.js';
 import { getCurrentUser, getDisplayName } from '../../services/auth.js';
 import { makeDebouncedAIRequest } from '../../services/ai-request-manager.js';
+import { toast } from '../../services/toast.js';
+import { typeInto } from '../../utils/typing.js';
 
 const QUICK_PROMPTS = [
   { icon: 'restaurant', text: 'What should I eat for lunch today?' },
@@ -168,14 +170,35 @@ function setupEvents() {
     chatArea.scrollTop = chatArea.scrollHeight;
 
     // Get AI response
-    const response = await callAI(text.trim());
+    let response;
+    try {
+      response = await callAI(text.trim());
+    } catch (e) {
+      response = `⚠️ ${e?.message || 'AI error'}`;
+      toast.error('AI request failed. Tap retry.');
+    }
     chatHistory.push({ role: 'assistant', text: response });
 
-    // Remove typing indicator and add response
+    // Remove typing indicator and stream the response with typing animation
     const typingEl = document.getElementById(typingId);
     if (typingEl) typingEl.remove();
-    chatArea.innerHTML += renderMessage({ role: 'assistant', text: response });
+    const respDomId = 'msg-' + Date.now();
+    chatArea.insertAdjacentHTML('beforeend', `
+      <div class="flex gap-2 mb-3 animate-fade-in">
+        <div class="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0 mt-1">
+          <span class="material-symbols-outlined text-primary text-sm" style="font-variation-settings: 'FILL' 1;">smart_toy</span>
+        </div>
+        <div class="max-w-[85%] p-3 rounded-2xl rounded-bl-md bg-surface-container-low border border-outline-variant/10 text-sm text-on-surface leading-relaxed">
+          <span id="${respDomId}"></span>
+        </div>
+      </div>`);
     chatArea.scrollTop = chatArea.scrollHeight;
+    const respEl = document.getElementById(respDomId);
+    await typeInto(respEl, response, {
+      cps: 90,
+      formatter: (s) => formatResponse(s),
+      onChunk: () => { chatArea.scrollTop = chatArea.scrollHeight; },
+    });
 
     // Hide quick prompts after first message
     const quickPromptsEl = document.getElementById('quickPrompts');

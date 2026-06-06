@@ -1,206 +1,158 @@
 /**
- * FitLife Service Worker
- * Provides offline support, caching strategy, and PWA installability.
+ * FitLife Service Worker — Production Hardened (Phase 4)
+ * ----------------------------------------------------------------------------
+ * Strategy:
+ *  - Precache shell (HTML, manifest, icons, offline page)
+ *  - Stale-while-revalidate for fonts & CDN (Tailwind/JSDelivr)
+ *  - Network-first for Supabase + Gemini APIs (with 6s timeout)
+ *  - Offline fallback page for failed navigations
+ *  - Auto-skipWaiting + clients.claim on activate
+ *  - SKIP_WAITING postMessage hook for app-triggered updates
  */
 
-const CACHE_VERSION = 'fitlife-v1.1.0';
-const STATIC_CACHE = `${CACHE_VERSION}-static`;
-const DYNAMIC_CACHE = `${CACHE_VERSION}-dynamic`;
-const API_CACHE = `${CACHE_VERSION}-api`;
+const CACHE_VERSION = 'fitlife-v2.0.0';
+const STATIC_CACHE  = `${CACHE_VERSION}-static`;
+const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
+const FONTS_CACHE   = `${CACHE_VERSION}-fonts`;
 
-// Assets to precache on install
-const PRECACHE_URLS = [
+const SHELL_URLS = [
   '/',
+  '/index.html',
+  '/offline.html',
   '/manifest.json',
   '/assets/icons/favicon.svg',
   '/assets/icons/icon-192.png',
   '/assets/icons/icon-512.png',
 ];
 
-// External CDN resources to cache on first use
-const CDN_PATTERNS = [
+const NETWORK_FIRST_HOSTS = [
+  'supabase.co',
+  'supabase.in',
+  'generativelanguage.googleapis.com',
+  'openrouter.ai',
+];
+
+const STALE_WHILE_REVALIDATE_HOSTS = [
   'fonts.googleapis.com',
   'fonts.gstatic.com',
   'cdn.tailwindcss.com',
   'cdn.jsdelivr.net',
 ];
 
-// API patterns that should use network-first
-const API_PATTERNS = [
-  'supabase.co',
-  'generativelanguage.googleapis.com',
-];
-
-// Install: Precache static assets
+// ── Install ───────────────────────────────────────────────────────────────
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(STATIC_CACHE)
-      .then(cache => cache.addAll(PRECACHE_URLS))
+      .then((cache) => cache.addAll(SHELL_URLS).catch(() => null))
       .then(() => self.skipWaiting())
   );
 });
 
-// Activate: Clean old caches
+// ── Activate ──────────────────────────────────────────────────────────────
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys()
-      .then(keys => Promise.all(
-        keys.filter(key => key !== STATIC_CACHE && key !== DYNAMIC_CACHE && key !== API_CACHE)
-          .map(key => caches.delete(key))
-      ))
-      .then(() => self.clients.claim())
+    caches.keys().then((keys) =>
+      Promise.all(
+        keys
+          .filter((k) => ![STATIC_CACHE, RUNTIME_CACHE, FONTS_CACHE].includes(k))
+          .map((k) => caches.delete(k))
+      )
+    ).then(() => self.clients.claim())
   );
 });
 
-// Fetch: Smart caching strategy
+// ── App-triggered update ──────────────────────────────────────────────────
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
+});
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+function isNetworkFirstHost(url) {
+  return NETWORK_FIRST_HOSTS.some((h) => url.hostname.includes(h));
+}
+function isSWRHost(url) {
+  return STALE_WHILE_REVALIDATE_HOSTS.some((h) => url.hostname.includes(h));
+}
+
+async function networkFirst(request, timeoutMs = 6000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(request, { signal: controller.signal });
+    clearTimeout(timer);
+    return res;
+  } catch (err) {
+    clearTimeout(timer);
+    const cached = await caches.match(request);
+    if (cached) return cached;
+    throw err;
+  }
+}
+
+async function staleWhileRevalidate(request, cacheName) {
+  const cache = await caches.open(cacheName);
+  const cached = await cache.match(request);
+  const networkFetch = fetch(request)
+    .then((res) => { if (res && res.ok) cache.put(request, res.clone()); return res; })
+    .catch(() => cached);
+  return cached || networkFetch;
+}
+
+async function cacheFirst(request, cacheName) {
+  const cache = await caches.open(cacheName);
+  const cached = await cache.match(request);
+  if (cached) return cached;
+  const res = await fetch(request);
+  if (res && res.ok && request.method === 'GET') cache.put(request, res.clone());
+  return res;
+}
+
+async function navigationHandler(request) {
+  try {
+    return await fetch(request);
+  } catch {
+    const offline = await caches.match('/offline.html');
+    if (offline) return offline;
+    return new Response('<h1>Offline</h1>', { status: 503, headers: { 'Content-Type': 'text/html' } });
+  }
+}
+
+// ── Fetch ─────────────────────────────────────────────────────────────────
 self.addEventListener('fetch', (event) => {
   const { request } = event;
+  if (request.method !== 'GET') return;
   const url = new URL(request.url);
 
-  // Skip non-GET requests
-  if (request.method !== 'GET') return;
-
-  // Skip chrome-extension and other non-http(s) requests
-  if (!url.protocol.startsWith('http')) return;
-
-  // API requests: Network-first with timeout
-  if (API_PATTERNS.some(p => url.hostname.includes(p))) {
-    event.respondWith(networkFirstWithTimeout(request, API_CACHE, 5000));
+  // SPA navigation → offline fallback if no network
+  if (request.mode === 'navigate') {
+    event.respondWith(navigationHandler(request));
     return;
   }
 
-  // CDN resources: Cache-first (they're versioned)
-  if (CDN_PATTERNS.some(p => url.hostname.includes(p))) {
-    event.respondWith(cacheFirst(request, DYNAMIC_CACHE));
-    return;
-  }
-
-  // Same-origin requests: Stale-while-revalidate
+  // Same-origin assets (JS/CSS/images/icons)
   if (url.origin === self.location.origin) {
+    if (url.pathname.startsWith('/assets/') || /\.(?:js|css|svg|png|jpg|jpeg|webp|woff2?)$/.test(url.pathname)) {
+      event.respondWith(cacheFirst(request, RUNTIME_CACHE));
+      return;
+    }
+    // Manifest, offline.html, etc.
     event.respondWith(staleWhileRevalidate(request, STATIC_CACHE));
     return;
   }
 
-  // Everything else: Network-first
-  event.respondWith(networkFirst(request, DYNAMIC_CACHE));
+  // Third-party: APIs (Supabase, Gemini)
+  if (isNetworkFirstHost(url)) {
+    event.respondWith(networkFirst(request, 6000));
+    return;
+  }
+  // Fonts & CDN
+  if (isSWRHost(url)) {
+    event.respondWith(staleWhileRevalidate(request, FONTS_CACHE));
+    return;
+  }
+
+  // Default: try network, fall back to cache
+  event.respondWith(
+    fetch(request).catch(() => caches.match(request))
+  );
 });
-
-// Cache-first strategy
-async function cacheFirst(request, cacheName) {
-  const cached = await caches.match(request);
-  if (cached) return cached;
-
-  try {
-    const response = await fetch(request);
-    if (response.ok) {
-      const cache = await caches.open(cacheName);
-      cache.put(request, response.clone());
-    }
-    return response;
-  } catch {
-    return offlineFallback();
-  }
-}
-
-// Network-first strategy
-async function networkFirst(request, cacheName) {
-  try {
-    const response = await fetch(request);
-    if (response.ok) {
-      const cache = await caches.open(cacheName);
-      cache.put(request, response.clone());
-    }
-    return response;
-  } catch {
-    const cached = await caches.match(request);
-    return cached || offlineFallback();
-  }
-}
-
-// Network-first with timeout
-async function networkFirstWithTimeout(request, cacheName, timeout) {
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeout);
-    const response = await fetch(request, { signal: controller.signal });
-    clearTimeout(timer);
-    if (response.ok) {
-      const cache = await caches.open(cacheName);
-      cache.put(request, response.clone());
-    }
-    return response;
-  } catch {
-    const cached = await caches.match(request);
-    return cached || offlineFallback();
-  }
-}
-
-// Stale-while-revalidate
-async function staleWhileRevalidate(request, cacheName) {
-  const cached = await caches.match(request);
-  
-  const fetchPromise = fetch(request).then(async (response) => {
-    if (response.ok) {
-      const cache = await caches.open(cacheName);
-      cache.put(request, response.clone());
-    }
-    return response;
-  }).catch(() => null);
-
-  return cached || (await fetchPromise) || offlineFallback();
-}
-
-// Offline fallback page
-function offlineFallback() {
-  return new Response(`
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>FitLife - Offline</title>
-      <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-          font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
-          background: #0e150e; color: #dce5d9;
-          display: flex; align-items: center; justify-content: center;
-          min-height: 100vh; padding: 24px; text-align: center;
-        }
-        .container { max-width: 380px; }
-        .icon { font-size: 64px; margin-bottom: 24px; }
-        h1 { font-size: 24px; font-weight: 800; margin-bottom: 8px; }
-        p { color: #bccbb9; font-size: 14px; line-height: 1.6; margin-bottom: 24px; }
-        button {
-          background: #22c55e; color: #004b1e; border: none;
-          padding: 12px 32px; border-radius: 999px; font-weight: 700;
-          font-size: 14px; cursor: pointer;
-        }
-      </style>
-    </head>
-    <body>
-      <div class="container">
-        <div class="icon">📡</div>
-        <h1>You're Offline</h1>
-        <p>FitLife needs an internet connection to sync your data. Please check your connection and try again.</p>
-        <button onclick="window.location.reload()">Try Again</button>
-      </div>
-    </body>
-    </html>
-  `, {
-    status: 503,
-    headers: { 'Content-Type': 'text/html; charset=utf-8' },
-  });
-}
-
-// Background sync for meal data (when available)
-self.addEventListener('sync', (event) => {
-  if (event.tag === 'sync-meals') {
-    event.waitUntil(syncMeals());
-  }
-});
-
-async function syncMeals() {
-  // Future: sync offline meal entries when connection restored
-  console.log('[SW] Background sync: meals');
-}
