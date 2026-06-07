@@ -186,15 +186,21 @@ async function init() {
   });
 
   // PWA update hook (controller change = new SW activated)
-  if ('serviceWorker' in navigator) {
-    let refreshed = false;
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (refreshed) return;
-      refreshed = true;
-      toast.success('App updated. Reloading...');
-      setTimeout(() => location.reload(), 800);
-    });
-  }
+if ('serviceWorker' in navigator) {
+  let refreshed = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (refreshed) return; // تمنع إعادة تحميل متكررة
+    refreshed = true;
+    
+    // إشعار للمستخدم أن التطبيق تم تحديثه
+    toast.success('App updated. Reloading...');
+
+    // إعادة تحميل الصفحة بعد 1.5 ثانية لثبات أفضل على كل المتصفحات (خصوصًا Safari)
+    setTimeout(() => {
+      window.location.reload();
+    }, 1500);
+  });
+}
 
   // Initial smart redirect
   const hash = window.location.hash.slice(1) || '/';
