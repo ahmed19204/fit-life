@@ -25,7 +25,7 @@ export function renderSplash() {
   }, 50);
 
   return `
-    <div class="min-h-screen bg-surface flex items-center justify-center px-6" style="min-height:100dvh;">
+    <div class="min-h-screen bg-surface flex items-center justify-center px-6 pl-safe pr-safe pt-safe pb-safe" style="min-height:100dvh;">
       <div class="flex flex-col items-center gap-5 text-center animate-fade-in">
         <div class="w-20 h-20 rounded-3xl bg-gradient-to-br from-primary-container to-primary flex items-center justify-center"
              style="box-shadow:0 0 60px rgba(34,197,94,0.3);">

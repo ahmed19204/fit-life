@@ -29,9 +29,16 @@ import { z as _z } from 'zod';
 export const z = _z;
 
 // ─── Coercion helpers (used by sanitize* below) ────────────────────────────
+const normalizeDigits = (value) => String(value ?? '')
+  .replace(/[٠-٩]/g, (digit) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit)))
+  .replace(/[۰-۹]/g, (digit) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)))
+  .replace(/[٫]/g, '.')
+  .replace(/[،]/g, ',');
+
 const toFiniteNumber = (v, fb = 0) => {
   if (typeof v === 'number' && Number.isFinite(v)) return v;
-  const n = Number(String(v ?? '').replace(/[^0-9.\-]/g, ''));
+  const normalized = normalizeDigits(v).replace(/(?<=\d),(?=\d)/g, '.');
+  const n = Number(normalized.replace(/[^0-9.\-]/g, ''));
   return Number.isFinite(n) ? n : fb;
 };
 const toRoundedNumber = (v, fb = 0) => Math.max(0, Math.round(toFiniteNumber(v, fb)));

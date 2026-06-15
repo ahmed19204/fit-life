@@ -68,12 +68,12 @@ export async function renderAdmin() {
   // Enforce admin access — redirect non-admins
   if (!ADMIN_EMAILS.includes(user.email)) {
     return `
-      <div class="min-h-screen bg-surface text-on-surface flex items-center justify-center px-6">
-        <div class="text-center">
+      <div class="min-h-screen bg-surface text-on-surface flex items-center justify-center px-6 pl-safe pr-safe pt-safe pb-safe overflow-x-hidden" style="min-height:100dvh;">
+        <div class="text-center max-w-md">
           <span class="material-symbols-outlined text-error text-5xl mb-4 block">shield</span>
           <h2 class="text-xl font-bold text-on-surface mb-2">Access Denied</h2>
           <p class="text-sm text-on-surface-variant mb-6">You don't have admin privileges. Contact your administrator.</p>
-          <button onclick="window.location.hash='/dashboard'" class="px-6 py-3 rounded-full bg-primary-container text-on-primary-container font-bold text-sm">Go to Dashboard</button>
+          <button onclick="window.location.hash='/dashboard'" class="px-6 py-3 rounded-full bg-primary-container text-on-primary-container font-bold text-sm min-h-[44px]">Go to Dashboard</button>
         </div>
       </div>`;
   }
@@ -81,7 +81,7 @@ export async function renderAdmin() {
   const stats = await fetchAdminStats();
 
   return `
-    <div class="min-h-screen bg-surface text-on-surface pb-8">
+    <div class="min-h-screen bg-surface text-on-surface pb-8 pb-safe pl-safe pr-safe overflow-x-hidden" style="min-height:100dvh;">
       ${renderPageHeader({ title: 'Admin Dashboard', subtitle: 'Ecosystem Control Center', showBack: true })}
       
       <div class="px-5 py-5 space-y-5">

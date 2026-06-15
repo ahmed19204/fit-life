@@ -23,8 +23,8 @@ const plugins = [];
 if (VitePWA) {
   plugins.push(
     VitePWA({
-      registerType: 'autoUpdate',
-      injectRegister: 'auto',
+      registerType: 'prompt',
+      injectRegister: false,
       strategies: 'generateSW',
       // Don't overwrite our custom sw.js — let the plugin produce a separate one
       // at /pwa-sw.js so the existing app code keeps working unmodified.

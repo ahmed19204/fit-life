@@ -34,7 +34,7 @@ export function renderAuth() {
   setTimeout(() => initAuthPage(), 50);
 
   return `
-    <div data-loading-scope class="min-h-screen bg-surface flex flex-col items-center justify-center px-5 py-8 relative overflow-hidden">
+    <div data-loading-scope class="min-h-screen bg-surface flex flex-col items-center justify-center px-5 pl-safe pr-safe pt-safe pb-safe py-8 relative overflow-hidden">
       <div class="absolute inset-0 overflow-hidden pointer-events-none">
         <div class="absolute top-[-200px] left-1/2 -translate-x-1/2 w-[600px] h-[600px] rounded-full opacity-[0.06]"
              style="background: radial-gradient(circle, #22c55e 0%, transparent 70%);"></div>

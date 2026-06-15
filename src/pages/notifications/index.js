@@ -50,7 +50,7 @@ export function renderNotifications() {
   setTimeout(setupNotificationHandlers, 50);
 
   return `
-    <div class="min-h-screen bg-surface text-on-surface pb-8">
+    <div class="min-h-screen bg-surface text-on-surface pb-8 pl-safe pr-safe">
       ${renderPageHeader({ 
         title: 'Notifications', 
         showBack: true,

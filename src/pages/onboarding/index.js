@@ -26,9 +26,9 @@ export function renderOnboarding() {
 
 function buildStepHTML() {
   return `
-    <div class="min-h-screen bg-surface text-on-surface flex flex-col">
+    <div class="min-h-screen bg-surface text-on-surface flex flex-col pl-safe pr-safe pt-safe pb-safe">
       <!-- Header -->
-      <header class="px-5 pt-5 pb-3 flex items-center justify-between">
+      <header class="px-5 pt-3 pb-3 flex items-center justify-between">
         <button onclick="onboardingBack()" class="w-9 h-9 flex items-center justify-center rounded-full bg-surface-container-high/50 text-on-surface hover:bg-surface-container-highest transition-colors">
           <span class="material-symbols-outlined text-[20px]">arrow_back</span>
         </button>
@@ -49,7 +49,7 @@ function buildStepHTML() {
       </div>
 
       <!-- Bottom Action -->
-      <div class="fixed bottom-0 left-0 right-0 px-5 py-4 border-t border-outline-variant/10"
+      <div class="fixed bottom-0 left-0 right-0 px-5 pl-safe pr-safe pb-safe py-4 border-t border-outline-variant/10"
            style="background: rgba(14, 21, 14, 0.95); backdrop-filter: blur(16px);">
         <button id="nextStepBtn" onclick="onboardingNext()"
                 class="w-full py-3.5 rounded-full bg-primary-container text-on-primary-container font-bold text-sm hover:shadow-lg hover:shadow-primary/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2">

@@ -26,8 +26,8 @@ const log = logger.scoped('AIMgr');
 const CONFIG = {
   MIN_REQUEST_INTERVAL_MS: 2000,
   DEBOUNCE_MS: 500,
-  MAX_RETRIES: 2,
-  RETRY_BASE_DELAY_MS: 3000,
+  MAX_RETRIES: 3,
+  RETRY_BASE_DELAY_MS: 1000,
   RETRY_MAX_DELAY_MS: 30000,
   CACHE_TTL_MS: 5 * 60 * 1000,
   PERSIST_CACHE_TTL_MS: 24 * 60 * 60 * 1000, // 24h persistent cache
@@ -199,7 +199,7 @@ async function executeWithRetry(executor, retries = CONFIG.MAX_RETRIES, signal) 
 
       if (attempt < retries) {
         const delay = Math.min(
-          CONFIG.RETRY_BASE_DELAY_MS * Math.pow(3, attempt),
+          CONFIG.RETRY_BASE_DELAY_MS * Math.pow(2, attempt),
           CONFIG.RETRY_MAX_DELAY_MS
         );
         const isRate = (status === 429 || errMsg.includes('429') || errMsg.includes('rate'));

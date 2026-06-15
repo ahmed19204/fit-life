@@ -95,7 +95,7 @@ export async function renderStreaks() {
   const consistencyScore = Math.round((weekActivity.filter(d => d.active).length / 7) * 100);
 
   return `
-    <div class="min-h-screen bg-surface text-on-surface pb-24">
+    <div class="min-h-screen bg-surface text-on-surface pb-28 pl-safe pr-safe">
       ${renderPageHeader({ title: 'Streaks & Achievements', showBack: true })}
 
       <div class="px-5 py-5 space-y-5">

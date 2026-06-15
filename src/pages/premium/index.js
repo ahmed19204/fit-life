@@ -63,7 +63,7 @@ function setupPremiumHandlers() {
 export function renderPremium() {
   setTimeout(setupPremiumHandlers, 50);
   return `
-    <div class="min-h-screen bg-surface text-on-surface pb-8">
+    <div class="min-h-screen bg-surface text-on-surface pb-8 pl-safe pr-safe">
       ${renderPageHeader({ title: 'Premium', showBack: true })}
 
       <div class="px-5 py-5 space-y-6">

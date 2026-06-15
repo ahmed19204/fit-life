@@ -37,7 +37,7 @@ export async function renderDailyMeals() {
   };
 
   return `
-    <div class="min-h-screen bg-surface text-on-surface pb-24">
+    <div class="min-h-screen bg-surface text-on-surface pb-28 pl-safe pr-safe">
       ${renderPageHeader({ title: 'Daily Meal Plan', subtitle: 'AI-optimized for your goals', showBack: true })}
 
       <div class="px-5 py-5 space-y-5">

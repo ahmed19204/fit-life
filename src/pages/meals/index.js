@@ -49,7 +49,7 @@ export function renderMeals() {
   isAnalyzing = false;
   setTimeout(() => initMealsPage(), 50);
   return `
-    <div class="min-h-screen bg-surface text-on-surface pb-24">
+    <div class="min-h-screen bg-surface text-on-surface pb-28 pl-safe pr-safe">
       ${renderPageHeader({ title: 'Analyze Food', subtitle: 'AI-powered nutrition analysis', showBack: true })}
       
       <div class="px-5 py-5 space-y-5">
@@ -294,7 +294,7 @@ function showError(message) {
   result.innerHTML = `
     <div class="text-center py-6">
       <span class="material-symbols-outlined text-error text-3xl mb-2 block">error</span>
-      <p class="text-sm text-on-surface font-medium mb-1">Analysis Failed</p>
+      <p class="text-sm text-on-surface font-medium mb-1">We couldn't auto-analyze this meal yet</p>
       <p class="text-xs text-on-surface-variant mb-4">${message}</p>
       <button onclick="window._retryAnalysis()" class="px-5 py-2.5 rounded-full bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20 transition-colors">
         Try Again

@@ -195,7 +195,7 @@ export async function renderRecipe() {
   setTimeout(() => setupRecipeHandlers(profile), 50);
 
   return `
-    <div class="min-h-screen bg-surface text-on-surface pb-24">
+    <div class="min-h-screen bg-surface text-on-surface pb-28 pl-safe pr-safe">
       ${renderPageHeader({ title: 'AI Recipes', subtitle: 'Personalized to your goals', showBack: true })}
 
       <div class="px-5 py-5 space-y-5">

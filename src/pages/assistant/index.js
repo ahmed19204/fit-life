@@ -233,7 +233,7 @@ export async function renderAssistant() {
 
   // Build page
   const html = `
-    <div class="min-h-screen bg-surface text-on-surface flex flex-col" style="height: 100dvh;">
+    <div class="min-h-screen bg-surface text-on-surface flex flex-col pl-safe pr-safe" style="height: 100dvh; min-height: 100dvh;">
       ${renderPageHeader({ 
         title: 'AI Coach', 
         subtitle: 'Your personal nutrition assistant',
@@ -244,7 +244,7 @@ export async function renderAssistant() {
       })}
 
       <!-- Chat Messages -->
-      <div id="chatMessages" class="flex-1 overflow-y-auto px-4 py-4" style="padding-bottom: 140px;">
+      <div id="chatMessages" class="flex-1 overflow-y-auto px-4 py-4 max-w-lg mx-auto w-full" style="padding-bottom: 140px;">
         ${chatHistory.length > 0 ? 
           chatHistory.map(msg => renderMessage(msg)).join('') : `
           <!-- Welcome State -->
@@ -273,7 +273,7 @@ export async function renderAssistant() {
       </div>
 
       <!-- Input Bar -->
-      <div class="fixed bottom-16 left-0 right-0 px-4 py-3 border-t border-outline-variant/10"
+      <div class="fixed bottom-16 left-0 right-0 px-4 pl-safe pr-safe pb-safe py-3 border-t border-outline-variant/10"
            style="background: rgba(14, 21, 14, 0.95); backdrop-filter: blur(20px);">
         <div class="flex gap-2 max-w-lg mx-auto">
           <label for="chatInput" class="sr-only">Message AI Coach</label>

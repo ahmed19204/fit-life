@@ -4,9 +4,10 @@
  */
 export function renderLanding() {
   return `
-    <div class="min-h-screen bg-surface text-on-surface overflow-x-hidden">
+    <div class="min-h-screen bg-surface text-on-surface overflow-x-hidden pl-safe pr-safe pt-safe pb-safe">
       <!-- Hero Section -->
-      <header class="relative min-h-screen flex flex-col">
+      <header class="relative min-h-screen flex flex-col overflow-x-hidden" style="min-height:100dvh;">
+        <div class="pt-3"></div>
         <!-- Background effects -->
         <div class="absolute inset-0 overflow-hidden">
           <div class="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[800px] rounded-full opacity-[0.07]"

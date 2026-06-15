@@ -1,30 +1,16 @@
 /**
  * Edge Function: AI Text Meal Analysis
  * POST /functions/v1/ai-analyze-text
- * Body: { description: "I ate a chicken salad with rice..." }
- * Returns: { success: true, data: { name, calories, protein, carbs, fat, foods, ... } }
+ * Body: { description: string }
  */
 import { handleCors, jsonOk, jsonError } from "../_shared/cors.ts";
+import { generateTextJson, LANGUAGE_INSTRUCTION } from "../_shared/gemini.ts";
 import {
-  geminiText,
-  parseAIJson,
-  LANGUAGE_INSTRUCTION,
-} from "../_shared/gemini.ts";
-
-const TEXT_PROMPT = `You are a professional nutritionist analyzing a meal description.
-Estimate the nutritional content based on what the user described eating.
-
-${LANGUAGE_INSTRUCTION}
-
-Return ONLY a valid JSON object with this exact structure:
-{"name":"Brief meal name","calories":number,"protein":number,"carbs":number,"fat":number,"foods":["ingredient 1","ingredient 2"],"servingSize":"estimated serving size","summary":"Brief 1-2 sentence description","mealType":"Breakfast|Lunch|Dinner|Snack"}
-
-Rules:
-- Be accurate with calorie and macro estimates
-- Break down the meal into individual ingredients
-- ONLY return JSON, no markdown, no explanation
-
-User's meal description:`;
+  buildCanonicalMealJsonInstructions,
+  estimateMealFromDescription,
+  normalizeMealDescription,
+  sanitizeMealAnalysis,
+} from "../_shared/meal-analysis.ts";
 
 Deno.serve(async (req: Request) => {
   const corsRes = handleCors(req);
@@ -45,49 +31,69 @@ Deno.serve(async (req: Request) => {
     return jsonError(400, "Invalid JSON body", "INVALID_JSON");
   }
 
-  const { description } = body;
-  if (!description || typeof description !== "string") {
+  const description = String(body?.description || "").trim();
+  if (!description) {
     return jsonError(400, "Missing meal description", "INVALID_PAYLOAD");
   }
 
-  const sanitized = description
+  const sanitizedDescription = description
     .replace(/ignore\s+(all\s+)?previous\s+instructions/gi, "[filtered]")
     .replace(/system\s*:\s*/gi, "[filtered]")
-    .slice(0, 2000)
+    .slice(0, 2500)
     .trim();
 
-  if (sanitized.length < 3) {
+  if (sanitizedDescription.length < 3) {
     return jsonError(400, "Description too short", "INVALID_PAYLOAD");
   }
 
-  const contents = [
-    { role: "user", parts: [{ text: TEXT_PROMPT + "\n" + sanitized }] },
-  ];
+  const normalized = normalizeMealDescription(sanitizedDescription);
+  const fallbackEstimate = estimateMealFromDescription(sanitizedDescription);
+
+  const prompt = [
+    "You are a production nutrition analysis engine.",
+    LANGUAGE_INSTRUCTION,
+    buildCanonicalMealJsonInstructions(),
+    "Use the user's quantity hints if present.",
+    "If the user mixed Arabic, Russian, and English, normalize everything correctly.",
+    "Do not output markdown or explanatory text.",
+    "Original user description:",
+    sanitizedDescription,
+    "Normalized helper text:",
+    normalized.normalizedText,
+  ].join("\n\n");
 
   try {
-    const text = await geminiText(apiKey, contents, {
-      maxTokens: 1000,
-      temperature: 0.4,
+    const result = await generateTextJson(apiKey, [{ role: "user", parts: [{ text: prompt }] }], {
+      context: "ai-analyze-text",
+      maxTokens: 900,
+      temperature: 0.2,
+      repairPrompt: `${buildCanonicalMealJsonInstructions()}\nReturn the same answer again as strict raw JSON only.`,
+      fallbackValue: fallbackEstimate,
     });
-    const data = parseAIJson(text);
-    return jsonOk({ success: true, data });
+
+    const safeData = sanitizeMealAnalysis(result.data, fallbackEstimate);
+    return jsonOk({
+      success: true,
+      data: safeData,
+      provider: result.provider,
+      fallback_used: result.fallbackUsed === true,
+      detected_language: normalized.language,
+    });
   } catch (err: any) {
-    console.error("[ai-analyze-text] Error:", err.message);
-    const status = err.status || 500;
-    if (status === 429) {
-      return jsonError(429, "AI service busy. Please try again shortly.");
-    }
-    if (err.message?.includes("parse")) {
-      return jsonError(
-        502,
-        "AI returned invalid format. Please try again.",
-        "PARSE_ERROR",
-      );
-    }
-    return jsonError(
-      status >= 500 ? 502 : status,
-      err.message || "Text analysis error",
-      "GEMINI_ERROR",
-    );
+    console.error("[ai-analyze-text] fatal error", {
+      message: err?.message,
+      status: err?.status || null,
+      raw: String(err?.rawResponse || "").slice(0, 1200),
+      repaired: String(err?.repairedResponse || "").slice(0, 1200),
+    });
+
+    const safeFallback = sanitizeMealAnalysis(fallbackEstimate, fallbackEstimate);
+    return jsonOk({
+      success: true,
+      data: safeFallback,
+      provider: "fallback",
+      fallback_used: true,
+      detected_language: normalized.language,
+    });
   }
 });

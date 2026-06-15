@@ -6,8 +6,8 @@
  *  - Stale-while-revalidate for fonts & CDN (Tailwind/JSDelivr)
  *  - Network-first for Supabase + Gemini APIs (with 6s timeout)
  *  - Offline fallback page for failed navigations
- *  - Auto-skipWaiting + clients.claim on activate
- *  - SKIP_WAITING postMessage hook for app-triggered updates
+ *  - Graceful updates without forced reload loops
+ *  - Optional SKIP_WAITING hook for future manual update UX
  */
 
 const CACHE_VERSION = 'fitlife-v2.0.0';
@@ -44,7 +44,6 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(STATIC_CACHE)
       .then((cache) => cache.addAll(SHELL_URLS).catch(() => null))
-      .then(() => self.skipWaiting())
   );
 });
 
@@ -57,7 +56,7 @@ self.addEventListener('activate', (event) => {
           .filter((k) => ![STATIC_CACHE, RUNTIME_CACHE, FONTS_CACHE].includes(k))
           .map((k) => caches.delete(k))
       )
-    ).then(() => self.clients.claim())
+    )
   );
 });
 

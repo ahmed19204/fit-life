@@ -76,8 +76,8 @@ async function handleRouteChange() {
       const safeMsg = String(e.message || 'Unknown error').replace(/[<>"'&]/g, c =>
         ({ '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '&': '&amp;' })[c]
       );
-      appContainer.innerHTML = `<div class="flex items-center justify-center min-h-screen text-on-surface">
-        <div class="text-center"><p class="text-xl mb-2">Something went wrong</p><p class="text-on-surface-variant">${safeMsg}</p></div></div>`;
+      appContainer.innerHTML = `<div class="flex items-center justify-center min-h-screen text-on-surface bg-surface px-6 pl-safe pr-safe pt-safe pb-safe overflow-x-hidden" style="min-height:100dvh;">
+        <div class="text-center max-w-md"><p class="text-xl mb-2">Something went wrong</p><p class="text-on-surface-variant break-words">${safeMsg}</p></div></div>`;
     }
 
     appContainer.style.opacity = '1';

@@ -1,16 +1,9 @@
 /**
  * Edge Function: AI Nutrition Plan Generator
  * POST /functions/v1/ai-nutrition
- * Body: { input: { age, weight, height, goal, activity_level, diet_type, ... } }
- *    OR { prompt: "raw prompt string" }
- * Returns: { success: true, data: { calories, protein, carbs, fat, meal_plan } }
  */
 import { handleCors, jsonOk, jsonError } from "../_shared/cors.ts";
-import {
-  geminiText,
-  parseAIJson,
-  LANGUAGE_INSTRUCTION,
-} from "../_shared/gemini.ts";
+import { generateTextJson, LANGUAGE_INSTRUCTION } from "../_shared/gemini.ts";
 
 Deno.serve(async (req: Request) => {
   const corsRes = handleCors(req);
@@ -31,80 +24,66 @@ Deno.serve(async (req: Request) => {
     return jsonError(400, "Invalid JSON body", "INVALID_JSON");
   }
 
-  const { prompt, input } = body;
+  const { prompt, input, targets } = body || {};
 
-  let finalPrompt: string;
-
-  if (prompt && typeof prompt === "string") {
-    // Legacy prompt-based call
+  let finalPrompt = "";
+  if (typeof prompt === "string" && prompt.trim()) {
     finalPrompt = prompt
       .replace(/ignore\s+(all\s+)?previous\s+instructions/gi, "[filtered]")
       .replace(/system\s*:\s*/gi, "[filtered]")
-      .slice(0, 5000);
+      .slice(0, 5000)
+      .trim();
   } else if (input && typeof input === "object") {
-    const i = input;
-    const diet =
-      i.restrictions?.length > 0
-        ? `Dietary restrictions: ${i.restrictions.join(", ")}.`
-        : "No dietary restrictions.";
-    const health =
-      i.health_conditions?.length > 0 &&
-      !i.health_conditions.includes("none")
-        ? `Health considerations: ${i.health_conditions.join(", ")}.`
-        : "No specific health conditions.";
+    const restrictions = Array.isArray(input.restrictions) && input.restrictions.length > 0
+      ? input.restrictions.join(", ")
+      : "none";
+    const conditions = Array.isArray(input.health_conditions) && input.health_conditions.length > 0
+      ? input.health_conditions.join(", ")
+      : "none";
 
-    finalPrompt = `You are a professional nutritionist creating a personalized meal plan.
-
-${LANGUAGE_INSTRUCTION}
-
-User Profile:
-- Age: ${i.age}, Weight: ${i.weight}kg, Height: ${i.height}cm
-- Goal: ${(i.goal || "").replace(/-/g, " ")}, Activity: ${(i.activity_level || "").replace(/-/g, " ")}
-- Diet: ${i.diet_type || "balanced"}, ${diet} ${health}
-- Meals/day: ${i.meals_per_day || 3}
-
-Return ONLY a JSON object:
-{"calories":number,"protein":number,"carbs":number,"fat":number,"meal_plan":[{"name":"string","calories":number,"protein":number,"carbs":number,"fat":number,"foods":["string"]}]}
-
-Requirements: Mifflin-St Jeor + activity multiplier + goal adjustment. ${i.meals_per_day || 3} meals. 2-4 foods per meal. ONLY JSON, no markdown.`;
+    finalPrompt = [
+      "You are an AI nutrition planning assistant.",
+      LANGUAGE_INSTRUCTION,
+      "Return ONLY one raw JSON object. No markdown. No code fences. No explanation.",
+      'Schema: {"calories":number,"protein":number,"carbs":number,"fat":number,"meal_plan":[{"name":"string","calories":number,"protein":number,"carbs":number,"fat":number,"foods":["string"]}]}',
+      "Keep meal names and foods practical, globally understandable, and nutritionally realistic.",
+      `Age: ${input.age}, Weight: ${input.weight}kg, Height: ${input.height}cm, Gender: ${input.gender || "neutral"}.`,
+      `Goal: ${input.goal || "maintain"}. Activity: ${input.activity_level || "sedentary"}. Meals/day: ${input.meals_per_day || 3}.`,
+      `Diet type: ${input.diet_type || "balanced"}. Restrictions: ${restrictions}. Health conditions: ${conditions}.`,
+      targets && typeof targets === "object"
+        ? `Stay close to these deterministic targets already computed by the app: ${targets.target_calories ?? "?"} kcal, ${targets.target_protein ?? "?"} g protein, ${targets.target_carbs ?? "?"} g carbs, ${targets.target_fat ?? "?"} g fat.`
+        : "Use evidence-based macro targets.",
+      `Return exactly ${input.meals_per_day || 3} meals. Use 2 to 4 foods per meal.`,
+    ].join("\n\n");
   } else {
-    return jsonError(
-      400,
-      "Missing prompt or input data",
-      "INVALID_PAYLOAD",
-    );
+    return jsonError(400, "Missing prompt or input data", "INVALID_PAYLOAD");
   }
 
   if (finalPrompt.length < 10) {
     return jsonError(400, "Prompt too short", "INVALID_PAYLOAD");
   }
 
-  const contents = [{ role: "user", parts: [{ text: finalPrompt }] }];
-
   try {
-    const text = await geminiText(apiKey, contents, {
-      maxTokens: 2000,
-      temperature: 0.7,
+    const result = await generateTextJson(apiKey, [{ role: "user", parts: [{ text: finalPrompt }] }], {
+      context: "ai-nutrition",
+      maxTokens: 1800,
+      temperature: 0.2,
+      repairPrompt: 'Return the same nutrition plan again as strict raw JSON only using the exact schema {"calories":number,"protein":number,"carbs":number,"fat":number,"meal_plan":[{"name":"string","calories":number,"protein":number,"carbs":number,"fat":number,"foods":["string"]}]}.',
     });
-    const data = parseAIJson(text);
-    return jsonOk({ success: true, data });
+
+    return jsonOk({
+      success: true,
+      data: result.data,
+      provider: result.provider,
+      fallback_used: result.fallbackUsed === true,
+    });
   } catch (err: any) {
-    console.error("[ai-nutrition] Error:", err.message);
-    const status = err.status || 500;
-    if (status === 429) {
-      return jsonError(429, "AI service busy. Please try again shortly.");
-    }
-    if (err.message?.includes("parse")) {
-      return jsonError(
-        502,
-        "AI returned invalid format. Please try again.",
-        "PARSE_ERROR",
-      );
-    }
-    return jsonError(
-      status >= 500 ? 502 : status,
-      err.message || "Nutrition plan error",
-      "GEMINI_ERROR",
-    );
+    console.error("[ai-nutrition] error", {
+      message: err?.message,
+      status: err?.status || null,
+      raw: String(err?.rawResponse || "").slice(0, 1200),
+      repaired: String(err?.repairedResponse || "").slice(0, 1200),
+    });
+    return jsonError(502, "Nutrition plan generation temporarily unavailable", "AI_PROVIDER_ERROR");
   }
 });
