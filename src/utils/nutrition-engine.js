@@ -1,53 +1,67 @@
 /**
  * FitLife Deterministic Nutrition Engine
  * -----------------------------------------------------------------------------
- * Evidence-based, metric-only nutrition calculations used as the FINAL source of
- * truth for calories and macros. AI may personalize meal names / foods, but the
- * final calories, protein, carbs, and fat MUST pass through this engine.
+ * Evidence-based, metric-only nutrition calculations used as the FINAL source
+ * of truth for calories and macros. AI may personalize meal names / foods, but
+ * the final calories, protein, carbs, and fat MUST pass through this engine.
+ *
+ * Public API
+ *   calculateBMR({ weight, height, age, gender })
+ *   getActivityMultiplier(activityLevel)
+ *   calculateTDEE({ bmr, activity_level })
+ *   calculateMacros(input)            // primary entry point
+ *   calculateMacroTargets(input)      // alias of calculateMacros (back-compat)
+ *   validateMacros(result, input)     // safety / sanity validator
+ *   buildDeterministicMealPlan({ input, totals, aiMeals })
+ *   buildNutritionPlan(input, aiMeals)
+ *   sanitizeMetricProfileInput(input)
+ *   validateNutritionInputs(input)
  *
  * Formulas used
- * - BMR: Mifflin-St Jeor Equation
- *   male   = 10*w + 6.25*h - 5*a + 5
- *   female = 10*w + 6.25*h - 5*a - 161
- *   unknown/other = midpoint of male and female estimates for a neutral default
+ *   BMR (Mifflin-St Jeor):
+ *     male     = 10*w + 6.25*h - 5*a + 5
+ *     female   = 10*w + 6.25*h - 5*a - 161
+ *     neutral  = midpoint of male and female estimates
  *
- * - TDEE: BMR × activity multiplier
- *   sedentary         1.20
- *   lightly-active    1.375
- *   moderately-active 1.55
- *   very-active       1.725
+ *   TDEE = BMR × activity multiplier
+ *     sedentary         1.20
+ *     lightly-active    1.375
+ *     moderately-active 1.55
+ *     very-active       1.725
  *
- * - Goal energy adjustments
- *   build-muscle  +250 kcal lean-bulk default (never more than +350)
- *   lose-weight   -400 kcal default deficit (clamped to -300…-500)
- *   maintain / improve-health  0 kcal
+ *   Goal energy adjustments (lean bulk / cautious deficit)
+ *     build-muscle    +250 default, clamped within [+250 .. +350]
+ *     lose-weight     -400 default, clamped within [-500 .. -300]
+ *     maintain / improve-health   0
  *
- * - Protein targets (g/kg)
- *   build-muscle   1.8–2.2  -> default 2.2
- *   lose-weight    2.0–2.4  -> default 2.3
- *   maintain       1.6–2.0  -> default 1.8
- *   improve-health 1.6–2.0  -> default 1.8
+ *   Protein targets (g/kg)
+ *     build-muscle     1.8 .. 2.2  (default 2.2)
+ *     lose-weight      2.0 .. 2.4  (default 2.3)
+ *     maintain         1.6 .. 2.0  (default 1.8)
+ *     improve-health   1.6 .. 2.0  (default 1.8)
  *
- * - Fat targets (g/kg)
- *   build-muscle   0.9
- *   lose-weight    0.8
- *   maintain       0.9
- *   improve-health 0.9
+ *   Fat targets (g/kg)
+ *     build-muscle     0.9
+ *     lose-weight      0.8
+ *     maintain         0.9
+ *     improve-health   0.9
  *
- * - Carbs: remaining calories after protein and fat.
+ *   Carbs: remaining calories after protein and fat.
  *
  * Safety rules
- * - Never exceed 2.5 g/kg protein
- * - Never go below healthy calorie floors
- * - Keep carbs from going negative; if needed, reduce protein/fat toward the low
- *   end of their evidence-based ranges before finalizing.
+ *   - Never allow protein above 2.5 g/kg.
+ *   - Never drop calories below a gender-aware healthy floor.
+ *   - Keep carbs from going negative; if needed, reduce protein/fat toward the
+ *     low end of their evidence-based ranges before finalizing.
  *
- * Example test case (gender unspecified -> neutral midpoint BMR)
+ * Test example (gender unspecified -> neutral midpoint BMR)
  *   65 kg / 175 cm / 21 y / build-muscle / moderately-active
- *   => about 2645–2655 kcal, protein ~143 g, fat ~59 g, carbs ~346 g
- *   This fits the expected production range of ~2550–2700 kcal and ~140–155 g protein.
+ *   => about 2650 kcal, protein ~143 g, fat ~59 g, carbs ~392 g
+ *   Fits the expected production range of ~2550-2700 kcal and ~140-155 g protein.
  * -----------------------------------------------------------------------------
  */
+
+// ─── Tables ────────────────────────────────────────────────────────────────
 
 const ACTIVITY_MULTIPLIERS = {
   sedentary: 1.2,
@@ -107,6 +121,8 @@ const MEAL_WEIGHTS = {
   6: [0.20, 0.10, 0.25, 0.10, 0.23, 0.12],
 };
 
+// ─── Small helpers ─────────────────────────────────────────────────────────
+
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
@@ -155,6 +171,8 @@ function calorieFloorForGender(gender) {
   return 1350;
 }
 
+// ─── Input validation ──────────────────────────────────────────────────────
+
 export function validateNutritionInputs(input = {}) {
   const errors = [];
   const weight = toNumber(input.weight);
@@ -180,6 +198,8 @@ export function validateNutritionInputs(input = {}) {
     },
   };
 }
+
+// ─── Core formulas ─────────────────────────────────────────────────────────
 
 export function calculateBMR({ weight, height, age, gender = 'neutral' }) {
   const male = (10 * weight) + (6.25 * height) - (5 * age) + 5;
@@ -282,10 +302,12 @@ function ensureMinimumCarbs({ calories, protein, fat, weight, rules }) {
   return { protein: proteinG, fat: fatG, carbs: carbsG };
 }
 
+// ─── Primary entry points ──────────────────────────────────────────────────
+
 /**
  * calculateMacros()
  * Public reusable wrapper required by the app spec.
- * Returns deterministic BMR/TDEE/calorie/macro targets.
+ * Returns deterministic BMR / TDEE / calorie / macro targets.
  */
 export function calculateMacros(input = {}) {
   const validation = validateNutritionInputs(input);
@@ -295,26 +317,39 @@ export function calculateMacros(input = {}) {
 
   const normalized = validation.normalized;
   const rules = getGoalRules(normalized.goal);
-  const bmr = calculateBMR({ ...normalized, weight: validation.normalized.weight, height: validation.normalized.height, age: validation.normalized.age });
+  const bmr = calculateBMR({
+    weight: normalized.weight,
+    height: normalized.height,
+    age: normalized.age,
+    gender: normalized.gender,
+  });
   const tdee = calculateTDEE({ bmr, activity_level: normalized.activity_level });
 
   const floor = Math.max(calorieFloorForGender(normalized.gender), roundInt(bmr));
   let targetCalories = tdee + clamp(rules.calorieAdjustment, rules.calorieBounds[0], rules.calorieBounds[1]);
   targetCalories = Math.max(targetCalories, floor);
 
-  let proteinG = clamp(validation.normalized.weight * rules.proteinTarget, validation.normalized.weight * rules.proteinRange[0], validation.normalized.weight * Math.min(2.5, rules.proteinRange[1]));
-  let fatG = clamp(validation.normalized.weight * rules.fatTarget, validation.normalized.weight * rules.fatRange[0], validation.normalized.weight * rules.fatRange[1]);
+  let proteinG = clamp(
+    normalized.weight * rules.proteinTarget,
+    normalized.weight * rules.proteinRange[0],
+    normalized.weight * Math.min(2.5, rules.proteinRange[1]),
+  );
+  let fatG = clamp(
+    normalized.weight * rules.fatTarget,
+    normalized.weight * rules.fatRange[0],
+    normalized.weight * rules.fatRange[1],
+  );
 
   const macroResult = ensureMinimumCarbs({
     calories: targetCalories,
     protein: proteinG,
     fat: fatG,
-    weight: validation.normalized.weight,
+    weight: normalized.weight,
     rules,
   });
 
-  proteinG = clamp(macroResult.protein, validation.normalized.weight * rules.proteinRange[0], validation.normalized.weight * 2.5);
-  fatG = clamp(macroResult.fat, validation.normalized.weight * rules.fatRange[0], validation.normalized.weight * rules.fatRange[1]);
+  proteinG = clamp(macroResult.protein, normalized.weight * rules.proteinRange[0], normalized.weight * 2.5);
+  fatG = clamp(macroResult.fat, normalized.weight * rules.fatRange[0], normalized.weight * rules.fatRange[1]);
   let carbsG = Math.max(0, (targetCalories - (proteinG * 4) - (fatG * 9)) / 4);
 
   const calories = roundInt(targetCalories);
@@ -329,8 +364,8 @@ export function calculateMacros(input = {}) {
     protein,
     carbs,
     fat,
-    protein_per_kg: Number((protein / validation.normalized.weight).toFixed(2)),
-    fat_per_kg: Number((fat / validation.normalized.weight).toFixed(2)),
+    protein_per_kg: Number((protein / normalized.weight).toFixed(2)),
+    fat_per_kg: Number((fat / normalized.weight).toFixed(2)),
     meta: {
       gender: normalized.gender,
       goal: normalized.goal,
@@ -369,6 +404,8 @@ export function validateMacros(result = {}, input = {}) {
     },
   };
 }
+
+// ─── Meal plan builders ────────────────────────────────────────────────────
 
 export function buildDeterministicMealPlan({ input = {}, totals, aiMeals = [] } = {}) {
   const validation = validateNutritionInputs(input);
@@ -412,6 +449,8 @@ export function buildNutritionPlan(input = {}, aiMeals = []) {
     tdee: totals.tdee,
   };
 }
+
+// ─── Profile input sanitizer ───────────────────────────────────────────────
 
 export function sanitizeMetricProfileInput(input = {}) {
   const restrictions = Array.isArray(input.restrictions)

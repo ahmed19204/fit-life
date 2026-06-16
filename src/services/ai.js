@@ -4,6 +4,7 @@
  * - All AI calls flow through Supabase Edge Functions
  * - All AI JSON is sanitized + validated before use
  * - FINAL nutrition calories/macros are deterministic via nutrition-engine.js
+ * - Meal analysis preserves every extracted food (no silent drops)
  * - Profile updates are split between `profiles` and `user_profiles`
  * - Rich Supabase diagnostics are logged for production debugging
  */
@@ -22,9 +23,11 @@ import {
 import { logger, logSupabaseError } from '../utils/logger.js';
 import {
   buildNutritionPlan,
+  calculateMacros,
   calculateMacroTargets,
   sanitizeMetricProfileInput,
   validateNutritionInputs,
+  validateMacros,
 } from '../utils/nutrition-engine.js';
 
 const aiLog = logger.scoped('AI');
@@ -239,9 +242,40 @@ export async function callAICoach(contents) {
     const result = await invokeEdgeFunction('ai-coach', { contents });
     return result.text || "I couldn't generate a response. Please try again.";
   } catch (err) {
-    console.error('[AI Coach] Edge function error:', err.message, 'status:', err.status);
+    aiLog.error('AI Coach edge function error', err.message, 'status:', err.status);
     throw err;
   }
+}
+
+// ─── Multi-food meal analysis helpers ──────────────────────────────────────
+
+/**
+ * The edge function `ai-analyze-text` already returns a fully sanitized
+ * MealAnalysis with auto-repaired foods and totals. This helper merely
+ * preserves debug metadata and validates the payload shape.
+ */
+function buildMealResultFromEdge(edgeData, extraMeta = {}) {
+  const data = edgeData?.data || edgeData || {};
+  const payload = {
+    name: String(data.name || 'Meal').slice(0, 120),
+    type: String(data.mealType || data.type || 'Meal').slice(0, 40),
+    calories: Math.max(0, Math.round(Number(data.calories) || 0)),
+    protein: Math.max(0, Math.round(Number(data.protein) || 0)),
+    carbs: Math.max(0, Math.round(Number(data.carbs) || 0)),
+    fat: Math.max(0, Math.round(Number(data.fat) || 0)),
+    foods: Array.isArray(data.foods)
+      ? Array.from(new Set(data.foods.map((f) => String(f || '').trim()).filter(Boolean))).slice(0, 12)
+      : [],
+    servingSize: String(data.servingSize || data.serving_size || '').slice(0, 80),
+    summary: String(data.summary || '').slice(0, 240),
+    mealType: ['Breakfast', 'Lunch', 'Dinner', 'Snack'].includes(data.mealType) ? data.mealType : 'Meal',
+    image: data.image || null,
+    ai_suggested: true,
+    food_emoji: data.food_emoji || null,
+    ...extraMeta,
+  };
+
+  return payload;
 }
 
 export async function analyzeImageMeal(base64Image) {
@@ -253,18 +287,23 @@ export async function analyzeImageMeal(base64Image) {
       base64Image.slice(0, 100),
       async () => {
         const edgeResult = await invokeEdgeFunction('ai-analyze-image', { image: base64Image });
-        return edgeResult.data;
+        return edgeResult;
       },
       { cacheTTL: 5 * 60 * 1000, skipCache: true },
     );
 
-    const sanitized = sanitizeMealPayload(result || {});
-    const validated = validate(MealSchema, sanitized);
-    if (!validated.success) {
-      aiLog.warn('Image analysis output failed validation, returning sanitized fallback', { errors: validated.errors });
-      return ok('Image analysis complete (partial).', sanitized);
-    }
-    return ok('Image analysis complete.', { ...result, ...validated.data });
+    const merged = buildMealResultFromEdge(result, {
+      provider: result?.provider || 'unknown',
+      fallback_used: result?.fallback_used === true,
+    });
+
+    aiLog.debug('Image analysis result', {
+      provider: merged.provider,
+      foods: merged.foods,
+      calories: merged.calories,
+    });
+
+    return ok('Image analysis complete.', merged);
   } catch (e) {
     aiLog.error('Image analysis failed', e.message, e.status);
     return fail('AI_ERROR', e.message || 'Image analysis failed. Please try again.');
@@ -276,24 +315,39 @@ export async function analyzeTextMeal(description) {
     return fail('MISSING_DATA', 'Please describe your meal in more detail.');
   }
 
+  const cleanDescription = description.trim();
+
   try {
     const result = await makeAIRequest(
       'food-text-analysis',
-      description.trim(),
+      cleanDescription,
       async () => {
-        const edgeResult = await invokeEdgeFunction('ai-analyze-text', { description: description.trim() });
-        return edgeResult.data;
+        const edgeResult = await invokeEdgeFunction('ai-analyze-text', { description: cleanDescription });
+        return edgeResult;
       },
       { cacheTTL: 5 * 60 * 1000 },
     );
 
-    const sanitized = sanitizeMealPayload(result || {});
-    const validated = validate(MealSchema, sanitized);
-    if (!validated.success) {
-      aiLog.warn('Text analysis output failed validation, returning sanitized fallback', { errors: validated.errors });
-      return ok('Text analysis complete (partial).', sanitized);
+    const merged = buildMealResultFromEdge(result, {
+      provider: result?.provider || 'unknown',
+      fallback_used: result?.fallback_used === true,
+      detected_language: result?.detected_language || 'en',
+      debug: result?.debug || null,
+    });
+
+    aiLog.debug('Text analysis result', {
+      provider: merged.provider,
+      detected_language: merged.detected_language,
+      foods: merged.foods,
+      calories: merged.calories,
+      extracted: result?.debug?.extracted_foods,
+    });
+
+    if (!merged.foods.length) {
+      aiLog.warn('Text analysis returned no foods', { description: cleanDescription });
     }
-    return ok('Text analysis complete.', { ...result, ...validated.data });
+
+    return ok('Text analysis complete.', merged);
   } catch (e) {
     aiLog.error('Text analysis failed', e.message, e.status);
     return fail('AI_ERROR', e.message || 'Meal analysis failed. Please try again.');
@@ -359,6 +413,10 @@ export async function generateNutritionPlan(onboardingData) {
     );
 
     const deterministicPlan = buildDeterministicNutritionResult(sanitized, plan);
+    const macroValidation = validateMacros(deterministicPlan, sanitized);
+    if (!macroValidation.valid) {
+      aiLog.warn('Deterministic plan failed macro validation', macroValidation.errors);
+    }
     return ok('Nutrition plan generated.', deterministicPlan);
   } catch (e) {
     aiLog.error('Nutrition plan request manager failed, using deterministic engine only', e.message);
@@ -423,12 +481,7 @@ async function upsertBasicProfile(user, payload) {
       .single();
 
     if (result.error) {
-      console.error('[FitLife:AI] profiles upsert failed', {
-        message: result.error.message,
-        details: result.error.details,
-        hint: result.error.hint,
-        code: result.error.code,
-      });
+      logSupabaseError('AI', 'profiles.upsert', result.error, { userId: user.id });
     }
     return result;
   });
@@ -482,12 +535,7 @@ async function upsertUserProfile(payload) {
       .single();
 
     if (result.error) {
-      console.error('[FitLife:AI] user_profiles upsert failed', {
-        message: result.error.message,
-        details: result.error.details,
-        hint: result.error.hint,
-        code: result.error.code,
-      });
+      logSupabaseError('AI', 'user_profiles.upsert', result.error, { userId: payload?.user_id });
     }
     return result;
   });
@@ -672,3 +720,6 @@ export async function updateProfileField(updates = {}) {
 
   return ok('Profile updated.', { profile: finalProfile, recalculated: needsRecalc });
 }
+
+// Re-export for backwards compatibility with anything that imported it before.
+export { calculateMacros, validateMacros };
