@@ -6,7 +6,7 @@
   "cleanUrls": true,
   "trailingSlash": false,
   "rewrites": [
-    { "source": "/((?!api/|assets/|_vercel|favicon\\.ico|robots\\.txt|sitemap\\.xml|manifest\\.json|sw\\.js|pwa-sw\\.js|workbox-.*\\.js|offline\\.html|.*\\..*).*)", "destination": "/index.html" }
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
   "headers": [
     {

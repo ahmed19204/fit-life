@@ -1,185 +1,100 @@
-# FitLife - Architecture Documentation
+# FitLife - Bugs & Issues Tracker
 
-## System Overview
+## Critical (P0) - Blocking Production
 
-FitLife is a modern single-page application (SPA) built with vanilla JavaScript and ES Modules. It uses Supabase as the backend-as-a-service platform and Google Gemini AI for intelligent nutrition planning.
+_None currently blocking._
 
-## Architecture Diagram
+## High Priority (P1)
 
-```
-┌─────────────────────────────────────────────┐
-│                  Frontend                    │
-│  ┌──────────┐  ┌──────────┐  ┌───────────┐  │
-│  │  Pages   │  │Components│  │  Styles    │  │
-│  │ (20 pgs) │  │(nav,hdr) │  │ (tokens)  │  │
-│  └────┬─────┘  └────┬─────┘  └───────────┘  │
-│       │              │                        │
-│  ┌────┴──────────────┴──────────────────────┐│
-│  │            SPA Router (hash-based)        ││
-│  │         Auth Guards · Page Transitions    ││
-│  └──────────────────┬───────────────────────┘│
-│                     │                         │
-│  ┌──────────────────┴───────────────────────┐│
-│  │              Services Layer               ││
-│  │  auth.js · ai.js · meals.js · supabase.js││
-│  └──────────────────┬───────────────────────┘│
-│                     │                         │
-│  ┌──────────────────┴───────────────────────┐│
-│  │            Supabase JS Client             ││
-│  └──────────────────┬───────────────────────┘│
-└─────────────────────┼─────────────────────────┘
-                      │ HTTPS
-┌─────────────────────┼─────────────────────────┐
-│               Supabase Cloud                   │
-│  ┌──────────┐  ┌──────────┐  ┌──────────────┐│
-│  │PostgreSQL│  │   Auth   │  │Edge Functions ││
-│  │  (D1)    │  │(JWT/OAuth)│ │(Deno Runtime) ││
-│  └──────────┘  └──────────┘  └──────┬───────┘│
-└──────────────────────────────────────┼────────┘
-                                       │
-                      ┌────────────────┴────────┐
-                      │   Google Gemini AI API   │
-                      │   (gemini-2.5-flash)     │
-                      └─────────────────────────┘
-```
+### BUG-001: Google OAuth Redirect
+- **Status**: Open
+- **Severity**: P1
+- **Description**: Google OAuth redirect URL uses `${window.location.origin}/#/dashboard`. After OAuth callback, the hash fragment may be stripped by the OAuth provider, causing the user to land on the wrong page.
+- **Impact**: Google sign-in may not redirect to the correct page.
+- **Fix**: Handle the OAuth callback in `app.js` initialization by checking for Supabase auth tokens in URL params.
+- **File**: `src/services/auth.js`
 
-## Directory Structure
+### BUG-002: Admin Dashboard RLS Restrictions
+- **Status**: Open
+- **Severity**: P1
+- **Description**: Admin dashboard queries use the anon key, which is restricted by RLS policies. Admin-specific queries (listing all users, all meals) may return empty or limited data.
+- **Impact**: Admin stats may show inaccurate counts.
+- **Fix**: Implement a Supabase Edge Function with service_role key for admin queries, or create admin-specific RLS policies.
+- **File**: `src/pages/admin/index.js`
 
-```
-webapp/
-├── index.html                 # Main HTML shell (Tailwind config, PWA, fonts)
-├── package.json               # Vite + Supabase dependencies
-├── vite.config.js             # Vite build configuration
-├── vercel.json                # Vercel deployment config (SPA rewrites)
-├── ecosystem.config.cjs       # PM2 dev server configuration
-├── .env                       # Environment variables (Supabase + AI keys)
-├── .env.example               # Template for environment variables
-├── .gitignore                 # Git ignore rules
-│
-├── src/
-│   ├── app.js                 # Main entry: imports, routes, auth guards
-│   │
-│   ├── services/
-│   │   ├── supabase.js        # Supabase client singleton
-│   │   ├── auth.js            # Authentication (register, login, OAuth, session)
-│   │   ├── ai.js              # AI nutrition plan (Edge Function → Google AI → fallback)
-│   │   ├── meals.js           # Meals CRUD + analysis history
-│   │   └── router.js          # Hash-based SPA router with guards
-│   │
-│   ├── components/
-│   │   ├── nav-bar.js         # Bottom navigation bar (5 items)
-│   │   └── page-header.js     # Sticky glass-blur page header
-│   │
-│   ├── utils/
-│   │   └── validation.js      # Form validation helpers
-│   │
-│   ├── styles/
-│   │   └── design-tokens.js   # Midnight Emerald color tokens
-│   │
-│   └── pages/                 # 20 page modules
-│       ├── splash/index.js
-│       ├── landing/index.js
-│       ├── auth/index.js
-│       ├── welcome/index.js
-│       ├── onboarding/index.js
-│       ├── plan/index.js
-│       ├── dashboard/index.js
-│       ├── meals/index.js
-│       ├── daily-meals/index.js
-│       ├── recipe/index.js
-│       ├── progress/index.js
-│       ├── history/index.js
-│       ├── profile/index.js
-│       ├── assistant/index.js
-│       ├── notifications/index.js
-│       ├── streaks/index.js
-│       ├── premium/index.js
-│       ├── training/index.js
-│       └── admin/index.js
-│
-└── public/                    # Static assets (copied to dist)
-    ├── manifest.json          # PWA manifest
-    ├── sw.js                  # Service worker
-    └── assets/
-        └── icons/
-            ├── favicon.svg
-            ├── icon-192.png
-            ├── icon-512.png
-            └── apple-touch-icon.png
-```
+## Medium Priority (P2)
 
-## Data Flow
+### BUG-004: Session Refresh on Tab Reactivation
+- **Status**: Open
+- **Severity**: P2
+- **Description**: When user leaves the tab for extended periods and returns, the session may have expired. The app doesn't proactively refresh or redirect.
+- **Impact**: Users may encounter errors when performing actions after long inactivity.
+- **Fix**: Add visibility change listener to check session validity.
 
-### Authentication Flow
-```
-User → Auth Page → Supabase Auth → JWT Token → localStorage
-                                  → profiles table (upsert)
-                                  → Auth Guard → Dashboard
-```
+### BUG-005: Onboarding Data Persistence Between Steps
+- **Status**: Open
+- **Severity**: P2
+- **Description**: Onboarding data is stored in a local JS object. If the user refreshes mid-onboarding, all data is lost.
+- **Impact**: Users must restart onboarding from scratch after page refresh.
+- **Fix**: Persist onboarding progress in sessionStorage.
 
-### AI Nutrition Plan Flow
-```
-Onboarding Data → sanitize/validate → Edge Function (try)
-                                     → Google AI Direct (fallback)
-                                     → BMR Calculation (final fallback)
-                → user_profiles table (upsert)
-                → Plan Display Page
-```
+### BUG-006: Chat History Not Persisted
+- **Status**: Open
+- **Severity**: P2
+- **Description**: AI Coach chat history is stored in a module-level variable. Navigating away and returning clears the chat.
+- **Impact**: Users lose conversation context when navigating.
+- **Fix**: Store chat history in sessionStorage keyed by user ID.
 
-### Meal Logging Flow
-```
-Manual Entry → sanitize → meals table (insert)
-                        → getDailyNutritionSummary()
-                        → Dashboard Update
-```
+## Low Priority (P3)
 
-## Database Schema
+### BUG-007: Streaks Calculation Simplified
+- **Status**: Open
+- **Severity**: P3
+- **Description**: Streak calculation fetches last 100 meals and counts consecutive days. For users with many meals, this may miss older streak data.
+- **Impact**: Streak count may be inaccurate for very active users.
+- **Fix**: Create a dedicated streak tracking table or use Supabase RPC.
 
-### Tables
-- **profiles** — Basic user info (id, email, full_name) synced from auth
-- **user_profiles** — Nutrition profile + onboarding data + AI plan
-- **meals** — Logged meals with macros
-- **analysis_history** — AI analysis records
+### BUG-008: Static Notification Data
+- **Status**: Open
+- **Severity**: P3
+- **Description**: Notifications page uses hardcoded sample data, not real push notifications.
+- **Impact**: Notifications are not personalized or real-time.
+- **Fix**: Implement Web Push API or Supabase Realtime.
 
-### Row Level Security (RLS)
-All tables use RLS policies ensuring users can only access their own data. The setup.sql file in the original project defines all policies.
+### BUG-009: Training Page Demo Data
+- **Status**: Open
+- **Severity**: P3
+- **Description**: Training page uses hardcoded workout data (RECENT_WORKOUTS, WEEKLY_STATS). No database integration for workout tracking.
+- **Impact**: Training stats are static placeholders.
+- **Fix**: Create `workouts` table in Supabase and implement CRUD service.
 
-## Design System: Midnight Emerald
+---
 
-| Token | Value | Usage |
-|-------|-------|-------|
-| Surface | #0e150e | Background |
-| Primary | #4be277 | Interactive elements |
-| Primary Container | #22c55e | CTA buttons |
-| Secondary | #9ddf2e | Accent highlights |
-| Tertiary | #ffb5ab | Warning/orange elements |
-| On Surface | #dce5d9 | Primary text |
-| On Surface Variant | #bccbb9 | Secondary text |
-| Outline Variant | #3d4a3d | Borders |
-| Font | Plus Jakarta Sans | All text |
-| Icons | Material Symbols Outlined | All icons |
+## Resolved
 
-## Routing
+### BUG-003: AI API Key Exposed in Frontend ✅
+- **Status**: RESOLVED (Session 3)
+- **Resolution**: Moved Google AI API key to Vercel serverless functions (`api/ai-nutrition.js`, `api/ai-chat.js`). Removed ALL `VITE_GOOGLE_AI_API_KEY` references from `src/`. Key now uses non-VITE prefix (`GOOGLE_AI_API_KEY`) so Vite doesn't bundle it.
 
-Hash-based SPA routing (`/#/path`) with three access levels:
-1. **Public**: `/`, `/landing`, `/auth`
-2. **Auth (no onboarding)**: `/welcome`, `/onboarding`, `/plan`
-3. **Protected (auth + onboarding)**: All other routes
+### BUG-010: Vite Host Blocking ✅
+- **Status**: RESOLVED (Session 3)
+- **Resolution**: Changed `allowedHosts: 'all'` (string, broken in Vite 8) to `allowedHosts: true` (boolean, correct). Vite 8 was parsing the string as characters `['a','l','l']` instead of bypassing the host check.
 
-## Build & Deploy
+### BUG-011: XSS in Router Error Handler ✅
+- **Status**: RESOLVED (Session 3)
+- **Resolution**: Added HTML entity escaping to router.js error messages before innerHTML insertion.
 
-### Build Process
-```
-Vite Build → dist/
-  ├── index.html (with hashed JS reference)
-  ├── assets/main-[hash].js (bundled app)
-  ├── manifest.json
-  ├── sw.js
-  └── assets/icons/
-```
+### BUG-012: Admin Route Unprotected ✅
+- **Status**: RESOLVED (Session 3)
+- **Resolution**: Added email whitelist check in admin/index.js. Non-admin users see "Access Denied" page.
 
-### Deployment Target: Vercel
-- Framework: Vite
-- Build command: `npm run build`
-- Output directory: `dist`
-- SPA rewrite: `/(.*) → /index.html`
+### BUG-013: Unbound window._ Globals ✅
+- **Status**: RESOLVED (Session 3)
+- **Resolution**: Added `setupRecipeHandlers()`, `setupNotificationHandlers()`, `setupPremiumHandlers()` with proper `setTimeout(..., 50)` binding after render.
+
+### BUG-014: meals.js fail() Signature Mismatch ✅
+- **Status**: RESOLVED (Session 3)
+- **Resolution**: Updated shared `fail()` to support flexible call patterns. Updated all 18 fail() calls in meals.js.
+
+## Last Updated
+2026-05-27 (Session 3)
